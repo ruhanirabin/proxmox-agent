@@ -90,17 +90,23 @@ pa_load_version() {
 
 pa_load_env() {
   local source_rc
+  local source_err_file
   pa_source_env_file() {
     local file="$1"
     [ -f "$file" ] || return 0
+    source_err_file="$(mktemp)"
     # shellcheck disable=SC1090
     set +e
-    source "$file"
+    source "$file" 2>"$source_err_file"
     source_rc=$?
     set -e
     if [ "$source_rc" -ne 0 ]; then
       echo "[!] Warning: failed to fully parse $file (rc=$source_rc). Continue with loaded values and fix invalid lines." >&2
+      if [ -s "$source_err_file" ]; then
+        sed -n '1,3p' "$source_err_file" >&2 || true
+      fi
     fi
+    rm -f "$source_err_file"
   }
 
   if [ -n "${ENV_FILE:-}" ]; then

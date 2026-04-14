@@ -1,3 +1,8 @@
+## 0.7.23
+
+- fix: rewrite env key updates using safe full-line replacement so values with spaces (for example `GIT_COMMIT_NAME`) are persisted correctly.
+- improve: capture and summarize env parse stderr to avoid raw shell noise while still warning about malformed env lines.
+
 ## 0.7.22
 
 - improve: add prominent installer identity block (version/author/website) in bootstrap `install.sh` output.

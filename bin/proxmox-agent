@@ -130,13 +130,26 @@ set_env_kv() {
   local key="$2"
   local value="$3"
   local escaped
+  local tmp_file
   escaped="$(printf '%q' "$value")"
   touch "$file"
-  if grep -qE "^${key}=" "$file"; then
-    sed -i "s#^${key}=.*#${key}=${escaped}#g" "$file"
-  else
-    printf '\n%s=%s\n' "$key" "$escaped" >> "$file"
-  fi
+  tmp_file="$(mktemp)"
+  awk -v k="$key" -v v="$escaped" '
+    BEGIN { replaced = 0 }
+    $0 ~ ("^" k "=") {
+      print k "=" v
+      replaced = 1
+      next
+    }
+    { print }
+    END {
+      if (replaced == 0) {
+        print k "=" v
+      }
+    }
+  ' "$file" > "$tmp_file"
+  cat "$tmp_file" > "$file"
+  rm -f "$tmp_file"
 }
 
 prompt_value() {
