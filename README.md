@@ -65,6 +65,8 @@ sudo ./bin/proxmox-agent install
 - Backup repo path (`REPO_DIR`)
 - Branch (`REPO_BRANCH`)
 - Git remote URL (`GIT_REMOTE_URL`)
+- Git commit author full name (`GIT_COMMIT_NAME`)
+- Git commit author email (`GIT_COMMIT_EMAIL`)
 - Log retention days (`PA_LOG_RETENTION_DAYS`)
 - Notification mode (`telegram`, `webhook`, `both`) - at least one is required
 - Telegram values (`BOT_TOKEN`, `CHAT_ID`) if selected
@@ -158,6 +160,7 @@ Template source: `env/pa-agent.env.example`
 Important variables:
 
 - `REPO_DIR`, `REPO_BRANCH`, `GIT_REMOTE_URL`
+- `GIT_COMMIT_NAME`, `GIT_COMMIT_EMAIL`
 - `BACKUP_INCLUDE_EXTRA`
 - `BOT_TOKEN`, `CHAT_ID`
 - `WEBHOOK_ENABLED`, `WEBHOOK_URL`, `WEBHOOK_BEARER_TOKEN`

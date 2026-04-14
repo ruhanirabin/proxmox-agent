@@ -1,3 +1,9 @@
+## 0.7.19
+
+- feat: prompt for Git commit author full name and email during guided install and require valid identity before apply.
+- improve: persist commit identity in env/draft settings and configure local repo `git config user.name/user.email` automatically.
+- improve: document `GIT_COMMIT_NAME` and `GIT_COMMIT_EMAIL` in env template and README guided setup/configuration sections.
+
 ## 0.7.18
 
 - improve: replace final validation action input with numbered menu choices (Install, Save, Exit) while keeping text aliases supported.

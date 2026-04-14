@@ -424,17 +424,21 @@ save_install_draft() {
   local repo_branch="$2"
   local remote_url="$3"
   local retention_days="$4"
-  local notify_mode="$5"
-  local bot_token="$6"
-  local chat_id="$7"
-  local webhook_url="$8"
-  local webhook_token="$9"
+  local git_commit_name="$5"
+  local git_commit_email="$6"
+  local notify_mode="$7"
+  local bot_token="$8"
+  local chat_id="$9"
+  local webhook_url="${10}"
+  local webhook_token="${11}"
 
   cat > "$PA_ENV_DRAFT" <<EOF
 DRAFT_REPO_DIR=$(printf "%q" "$repo_dir")
 DRAFT_REPO_BRANCH=$(printf "%q" "$repo_branch")
 DRAFT_GIT_REMOTE_URL=$(printf "%q" "$remote_url")
 DRAFT_PA_LOG_RETENTION_DAYS=$(printf "%q" "$retention_days")
+DRAFT_GIT_COMMIT_NAME=$(printf "%q" "$git_commit_name")
+DRAFT_GIT_COMMIT_EMAIL=$(printf "%q" "$git_commit_email")
 DRAFT_NOTIFY_MODE=$(printf "%q" "$notify_mode")
 DRAFT_BOT_TOKEN=$(printf "%q" "$bot_token")
 DRAFT_CHAT_ID=$(printf "%q" "$chat_id")
@@ -461,10 +465,12 @@ validate_guided_inputs() {
   local repo_dir="$1"
   local repo_branch="$2"
   local remote_url="$3"
-  local notify_mode="$4"
-  local bot_token="$5"
-  local chat_id="$6"
-  local webhook_url="$7"
+  local git_commit_name="$4"
+  local git_commit_email="$5"
+  local notify_mode="$6"
+  local bot_token="$7"
+  local chat_id="$8"
+  local webhook_url="$9"
 
   local failed=0
   echo
@@ -472,6 +478,18 @@ validate_guided_inputs() {
 
   if [ -n "$repo_dir" ]; then ui_ok "repo_dir configured ($repo_dir)"; else ui_err "repo_dir is required"; failed=1; fi
   if [ -n "$repo_branch" ]; then ui_ok "repo_branch configured ($repo_branch)"; else ui_err "repo_branch is required"; failed=1; fi
+  if [ -n "$git_commit_name" ]; then
+    ui_ok "git commit author name configured"
+  else
+    ui_err "git commit author name is required"
+    failed=1
+  fi
+  if [[ -n "$git_commit_email" && "$git_commit_email" =~ ^[^[:space:]@]+@[^[:space:]@]+\.[^[:space:]@]+$ ]]; then
+    ui_ok "git commit author email configured"
+  else
+    ui_err "git commit author email is required and must be valid (name@example.com)"
+    failed=1
+  fi
   if is_supported_remote_url "$remote_url"; then
     if is_ssh_remote_url "$remote_url"; then
       ui_ok "git_remote_url format valid (SSH)"
@@ -529,11 +547,13 @@ print_guided_input_summary() {
   local repo_branch="$2"
   local remote_url="$3"
   local retention_days="$4"
-  local notify_mode="$5"
-  local bot_token="$6"
-  local chat_id="$7"
-  local webhook_url="$8"
-  local webhook_token="$9"
+  local git_commit_name="$5"
+  local git_commit_email="$6"
+  local notify_mode="$7"
+  local bot_token="$8"
+  local chat_id="$9"
+  local webhook_url="${10}"
+  local webhook_token="${11}"
   local remote_mode="HTTPS"
   is_ssh_remote_url "$remote_url" && remote_mode="SSH"
 
@@ -544,6 +564,8 @@ print_guided_input_summary() {
   echo "  - GIT_REMOTE_URL: $remote_url"
   echo "  - Remote auth mode: $remote_mode"
   echo "  - PA_LOG_RETENTION_DAYS: $retention_days"
+  echo "  - GIT_COMMIT_NAME: $git_commit_name"
+  echo "  - GIT_COMMIT_EMAIL: $git_commit_email"
   echo "  - Notification mode: $notify_mode"
   if [ "$notify_mode" = "telegram" ] || [ "$notify_mode" = "both" ]; then
     echo "  - BOT_TOKEN: $(mask_secret_value "$bot_token")"
@@ -608,12 +630,15 @@ guided_env_setup() {
   pa_load_env
 
   local repo_dir repo_branch remote_url retention_days
+  local git_commit_name git_commit_email
   local notify_mode bot_token chat_id webhook_enabled webhook_url webhook_token
 
   repo_dir="${REPO_DIR:-/root/pve-config}"
   repo_branch="${REPO_BRANCH:-main}"
   remote_url="${GIT_REMOTE_URL:-}"
   retention_days="${PA_LOG_RETENTION_DAYS:-14}"
+  git_commit_name="${GIT_COMMIT_NAME:-}"
+  git_commit_email="${GIT_COMMIT_EMAIL:-}"
   notify_mode="telegram"
   bot_token="${BOT_TOKEN:-}"
   chat_id="${CHAT_ID:-}"
@@ -629,13 +654,15 @@ guided_env_setup() {
         repo_branch="${DRAFT_REPO_BRANCH:-$repo_branch}"
         remote_url="${DRAFT_GIT_REMOTE_URL:-$remote_url}"
         retention_days="${DRAFT_PA_LOG_RETENTION_DAYS:-$retention_days}"
+        git_commit_name="${DRAFT_GIT_COMMIT_NAME:-$git_commit_name}"
+        git_commit_email="${DRAFT_GIT_COMMIT_EMAIL:-$git_commit_email}"
         notify_mode="${DRAFT_NOTIFY_MODE:-$notify_mode}"
         bot_token="${DRAFT_BOT_TOKEN:-$bot_token}"
         chat_id="${DRAFT_CHAT_ID:-$chat_id}"
         webhook_url="${DRAFT_WEBHOOK_URL:-$webhook_url}"
         webhook_token="${DRAFT_WEBHOOK_BEARER_TOKEN:-$webhook_token}"
         ui_ok "Loaded saved settings (resume mode)."
-        print_guided_input_summary "$repo_dir" "$repo_branch" "$remote_url" "$retention_days" "$notify_mode" "$bot_token" "$chat_id" "$webhook_url" "$webhook_token"
+        print_guided_input_summary "$repo_dir" "$repo_branch" "$remote_url" "$retention_days" "$git_commit_name" "$git_commit_email" "$notify_mode" "$bot_token" "$chat_id" "$webhook_url" "$webhook_token"
         ui_info "Reconfirm and edit any values in the next prompts."
       else
         ui_warn "Could not load saved installer settings file."
@@ -646,13 +673,15 @@ guided_env_setup() {
         repo_branch="${DRAFT_REPO_BRANCH:-$repo_branch}"
         remote_url="${DRAFT_GIT_REMOTE_URL:-$remote_url}"
         retention_days="${DRAFT_PA_LOG_RETENTION_DAYS:-$retention_days}"
+        git_commit_name="${DRAFT_GIT_COMMIT_NAME:-$git_commit_name}"
+        git_commit_email="${DRAFT_GIT_COMMIT_EMAIL:-$git_commit_email}"
         notify_mode="${DRAFT_NOTIFY_MODE:-$notify_mode}"
         bot_token="${DRAFT_BOT_TOKEN:-$bot_token}"
         chat_id="${DRAFT_CHAT_ID:-$chat_id}"
         webhook_url="${DRAFT_WEBHOOK_URL:-$webhook_url}"
         webhook_token="${DRAFT_WEBHOOK_BEARER_TOKEN:-$webhook_token}"
         ui_ok "Loaded saved settings."
-        print_guided_input_summary "$repo_dir" "$repo_branch" "$remote_url" "$retention_days" "$notify_mode" "$bot_token" "$chat_id" "$webhook_url" "$webhook_token"
+        print_guided_input_summary "$repo_dir" "$repo_branch" "$remote_url" "$retention_days" "$git_commit_name" "$git_commit_email" "$notify_mode" "$bot_token" "$chat_id" "$webhook_url" "$webhook_token"
         ui_info "Reconfirm and edit any values in the next prompts."
       else
         ui_warn "Could not load saved installer settings file."
@@ -701,6 +730,16 @@ guided_env_setup() {
   repo_dir="$(prompt_value "Backup local repo directory" "$repo_dir")"
   repo_branch="$(prompt_value "Backup git branch" "$repo_branch")"
   retention_days="$(prompt_value "Log retention days" "$retention_days")"
+  git_commit_name="$(prompt_value "Git commit author full name" "$git_commit_name")"
+  while [ -z "$git_commit_name" ]; do
+    ui_warn "Git commit author full name is required."
+    git_commit_name="$(prompt_value "Git commit author full name" "$git_commit_name")"
+  done
+  git_commit_email="$(prompt_value "Git commit author email" "$git_commit_email")"
+  while [[ -z "$git_commit_email" || ! "$git_commit_email" =~ ^[^[:space:]@]+@[^[:space:]@]+\.[^[:space:]@]+$ ]]; do
+    ui_warn "A valid commit author email is required (example: name@example.com)."
+    git_commit_email="$(prompt_value "Git commit author email" "$git_commit_email")"
+  done
 
   ui_info "Configure notifications."
   ui_info "Choose your notification setup."
@@ -746,8 +785,8 @@ guided_env_setup() {
     ui_warn "Placeholder values will be saved. Update /root/.pa-agent.env before enabling notifications."
   fi
 
-  print_guided_input_summary "$repo_dir" "$repo_branch" "$remote_url" "$retention_days" "$notify_mode" "$bot_token" "$chat_id" "$webhook_url" "$webhook_token"
-  if ! validate_guided_inputs "$repo_dir" "$repo_branch" "$remote_url" "$notify_mode" "$bot_token" "$chat_id" "$webhook_url"; then
+  print_guided_input_summary "$repo_dir" "$repo_branch" "$remote_url" "$retention_days" "$git_commit_name" "$git_commit_email" "$notify_mode" "$bot_token" "$chat_id" "$webhook_url" "$webhook_token"
+  if ! validate_guided_inputs "$repo_dir" "$repo_branch" "$remote_url" "$git_commit_name" "$git_commit_email" "$notify_mode" "$bot_token" "$chat_id" "$webhook_url"; then
     return 1
   fi
 
@@ -755,7 +794,7 @@ guided_env_setup() {
   final_action="$(prompt_final_action "install")"
   case "$final_action" in
     save)
-      save_install_draft "$repo_dir" "$repo_branch" "$remote_url" "$retention_days" "$notify_mode" "$bot_token" "$chat_id" "$webhook_url" "$webhook_token"
+      save_install_draft "$repo_dir" "$repo_branch" "$remote_url" "$retention_days" "$git_commit_name" "$git_commit_email" "$notify_mode" "$bot_token" "$chat_id" "$webhook_url" "$webhook_token"
       ui_ok "Settings saved to $PA_ENV_DRAFT"
       ui_info "Resume with: proxmox-agent install --resume"
       return 2
@@ -772,6 +811,8 @@ guided_env_setup() {
   set_env_kv "$PA_ENV_TARGET" "REPO_BRANCH" "$repo_branch"
   set_env_kv "$PA_ENV_TARGET" "GIT_REMOTE_URL" "$remote_url"
   set_env_kv "$PA_ENV_TARGET" "PA_LOG_RETENTION_DAYS" "$retention_days"
+  set_env_kv "$PA_ENV_TARGET" "GIT_COMMIT_NAME" "$git_commit_name"
+  set_env_kv "$PA_ENV_TARGET" "GIT_COMMIT_EMAIL" "$git_commit_email"
   set_env_kv "$PA_ENV_TARGET" "BOT_TOKEN" "$bot_token"
   set_env_kv "$PA_ENV_TARGET" "CHAT_ID" "$chat_id"
   set_env_kv "$PA_ENV_TARGET" "WEBHOOK_ENABLED" "$webhook_enabled"
@@ -892,6 +933,12 @@ collect_preinstall_report_data() {
   pa_load_env
   [ -n "${REPO_DIR:-}" ] || PRE_WARNINGS+=("REPO_DIR not set (default /root/pve-config will be used)")
   [ -n "${REPO_BRANCH:-}" ] || PRE_WARNINGS+=("REPO_BRANCH not set (default main will be used)")
+  [ -n "${GIT_COMMIT_NAME:-}" ] || PRE_WARNINGS+=("GIT_COMMIT_NAME not set (installer will prompt for commit author name)")
+  if [ -z "${GIT_COMMIT_EMAIL:-}" ]; then
+    PRE_WARNINGS+=("GIT_COMMIT_EMAIL not set (installer will prompt for commit author email)")
+  elif [[ ! "${GIT_COMMIT_EMAIL:-}" =~ ^[^[:space:]@]+@[^[:space:]@]+\.[^[:space:]@]+$ ]]; then
+    PRE_WARNINGS+=("GIT_COMMIT_EMAIL format looks invalid (installer will require a valid email)")
+  fi
   if [ -z "${GIT_REMOTE_URL:-}" ]; then
     PRE_BLOCKERS+=("GIT_REMOTE_URL is not configured")
   fi
@@ -1020,11 +1067,13 @@ cmd_preinstall_report() {
 }
 
 configure_repo_remote_if_needed() {
-  local repo_dir branch remote_from_env repo_created remote_action
+  local repo_dir branch remote_from_env repo_created remote_action git_commit_name git_commit_email
   pa_load_env
   repo_dir="${REPO_DIR:-/root/pve-config}"
   branch="${REPO_BRANCH:-main}"
   remote_from_env="${GIT_REMOTE_URL:-}"
+  git_commit_name="${GIT_COMMIT_NAME:-}"
+  git_commit_email="${GIT_COMMIT_EMAIL:-}"
   repo_created=0
   remote_action="none"
 
@@ -1045,6 +1094,13 @@ configure_repo_remote_if_needed() {
     fi
   fi
 
+  if [ -n "$git_commit_name" ]; then
+    git -C "$repo_dir" config user.name "$git_commit_name"
+  fi
+  if [ -n "$git_commit_email" ]; then
+    git -C "$repo_dir" config user.email "$git_commit_email"
+  fi
+
   if [ "$repo_created" -eq 1 ]; then
     ui_ok "Initialized git repository at $repo_dir (branch $branch)."
   else
@@ -1054,6 +1110,9 @@ configure_repo_remote_if_needed() {
     added) ui_ok "Configured git remote 'origin' -> $remote_from_env" ;;
     updated) ui_ok "Updated git remote 'origin' -> $remote_from_env" ;;
   esac
+  if [ -n "$git_commit_name" ] && [ -n "$git_commit_email" ]; then
+    ui_ok "Configured git commit identity for $repo_dir ($git_commit_name <$git_commit_email>)."
+  fi
 }
 
 validate_git_remote_access() {
