@@ -20,6 +20,8 @@ PA_RUNTIME_VERSION_FILE="$PA_BIN_TARGET/pa-agent-version"
 PA_RUNTIME_VERSION_LEGACY="$PA_BIN_TARGET/proxmox-agent-version"
 PA_BACKUP_DIR_BASE="/root/proxmox-agent-backups"
 PA_UPGRADE_LOG="/var/log/proxmox-agent-upgrade.log"
+PA_SSH_PRIVATE_KEY="/root/.ssh/id_ed25519"
+PA_SSH_PUBLIC_KEY="/root/.ssh/id_ed25519.pub"
 pa_ui_init
 C_RESET="${PA_UI_C_RESET}"
 C_BOLD="${PA_UI_C_BOLD}"
@@ -291,19 +293,37 @@ EOF
 }
 
 generate_ssh_key_if_missing() {
-  if [ ! -f /root/.ssh/id_ed25519 ]; then
-    ui_warn "No SSH key found at /root/.ssh/id_ed25519."
-    if ! prompt_yes_no "Generate a new SSH keypair for GitHub access now?" "y"; then
-      ui_warn "SSH key generation skipped by user."
-      return 1
-    fi
+  if [ -f "$PA_SSH_PRIVATE_KEY" ] && [ -f "$PA_SSH_PUBLIC_KEY" ]; then
+    ui_ok "Using existing SSH keypair."
+    ui_info "Private key: $PA_SSH_PRIVATE_KEY"
+    ui_info "Public key:  $PA_SSH_PUBLIC_KEY"
+    return 0
+  fi
+
+  mkdir -p /root/.ssh
+  chmod 700 /root/.ssh
+
+  if [ -f "$PA_SSH_PRIVATE_KEY" ] && [ ! -f "$PA_SSH_PUBLIC_KEY" ]; then
+    ui_warn "Private key exists but public key is missing. Regenerating public key..."
+    ssh-keygen -y -f "$PA_SSH_PRIVATE_KEY" > "$PA_SSH_PUBLIC_KEY"
+    chmod 644 "$PA_SSH_PUBLIC_KEY"
+    ui_ok "Generated public key from existing private key."
+    ui_info "Private key: $PA_SSH_PRIVATE_KEY"
+    ui_info "Public key:  $PA_SSH_PUBLIC_KEY"
+    return 0
+  fi
+
+  if [ ! -f "$PA_SSH_PRIVATE_KEY" ]; then
+    ui_warn "No SSH key found at $PA_SSH_PRIVATE_KEY. Generating a new SSH keypair..."
     mkdir -p /root/.ssh
     chmod 700 /root/.ssh
     ui_info "Generating SSH keypair..."
-    ssh-keygen -t ed25519 -C "proxmox-agent" -f /root/.ssh/id_ed25519 -N ""
-    chmod 600 /root/.ssh/id_ed25519
-    chmod 644 /root/.ssh/id_ed25519.pub
-    ui_ok "Created /root/.ssh/id_ed25519 and /root/.ssh/id_ed25519.pub"
+    ssh-keygen -t ed25519 -C "proxmox-agent" -f "$PA_SSH_PRIVATE_KEY" -N ""
+    chmod 600 "$PA_SSH_PRIVATE_KEY"
+    chmod 644 "$PA_SSH_PUBLIC_KEY"
+    ui_ok "Created SSH keypair."
+    ui_info "Private key: $PA_SSH_PRIVATE_KEY"
+    ui_info "Public key:  $PA_SSH_PUBLIC_KEY"
   fi
   return 0
 }
@@ -480,21 +500,25 @@ print_repo_url_guidance() {
 }
 
 show_public_key_for_github() {
-  if [ -f /root/.ssh/id_ed25519.pub ]; then
+  if [ -f "$PA_SSH_PUBLIC_KEY" ]; then
     ui_info "GitHub SSH key setup instructions:"
     echo "  1) Open: https://github.com/settings/keys"
     echo "  2) Click: New SSH key"
     echo "  3) Paste the full OpenSSH public key shown below"
     echo "  4) Save, then return here to continue"
     echo
-    ui_info "OpenSSH public key (/root/.ssh/id_ed25519.pub):"
+    ui_info "Private key location: $PA_SSH_PRIVATE_KEY"
+    ui_info "Public key location:  $PA_SSH_PUBLIC_KEY"
+    ui_info "OpenSSH public key content:"
     echo "----- BEGIN OPENSSH PUBLIC KEY -----"
-    cat /root/.ssh/id_ed25519.pub
+    cat "$PA_SSH_PUBLIC_KEY"
     echo "----- END OPENSSH PUBLIC KEY -----"
     echo
   else
-    ui_warn "Public key file not found at /root/.ssh/id_ed25519.pub"
+    ui_warn "Public key file not found at $PA_SSH_PUBLIC_KEY"
+    return 1
   fi
+  return 0
 }
 
 validate_github_ssh() {
@@ -569,16 +593,9 @@ guided_env_setup() {
   ui_info "Configure backup repository settings."
   ui_info "GitHub setup guidance:"
   print_repo_url_guidance
-  ui_info "If you plan to use SSH remote, add this node key to GitHub first."
-  if [ -f /root/.ssh/id_ed25519.pub ]; then
-    show_public_key_for_github
-  else
-    if generate_ssh_key_if_missing; then
-      show_public_key_for_github
-    else
-      ui_warn "SSH key was not generated. You can still continue with HTTPS remote."
-    fi
-  fi
+  ui_info "Preparing node SSH public key for GitHub copy/paste..."
+  generate_ssh_key_if_missing || true
+  show_public_key_for_github || true
   remote_url="$(prompt_value "Git remote URL (SSH or HTTPS)" "$remote_url")"
   while true; do
     if [ -z "$remote_url" ]; then

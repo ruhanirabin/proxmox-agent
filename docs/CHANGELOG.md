@@ -1,3 +1,8 @@
+## 0.7.16
+
+- improve: enforce SSH key display logic in guided setup: show existing public key, or generate keypair then show key paths and public key content.
+- improve: always print private/public key file locations alongside displayed public key for GitHub copy/paste.
+
 ## 0.7.15
 
 - fix: display (or generate then display) node OpenSSH public key during GitHub guidance, before remote URL prompt.
