@@ -1,3 +1,8 @@
+## 0.7.15
+
+- fix: display (or generate then display) node OpenSSH public key during GitHub guidance, before remote URL prompt.
+- improve: clarify that HTTPS can continue even if SSH key generation is skipped.
+
 ## 0.7.14
 
 - improve: move GitHub remote selection and SSH auth/key validation earlier in guided install, before local repo directory/branch prompts.
