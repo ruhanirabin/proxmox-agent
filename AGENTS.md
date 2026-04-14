@@ -34,6 +34,18 @@ This file defines operating rules for humans and automation (agents/bots) workin
   - `/usr/local/bin/pa-agent-version`
   - exports `AGENT_VERSION`.
 - Scripts must read `AGENT_VERSION`; do not maintain separate per-script semantic versions.
+- Version format is fixed: `MAJOR.MINOR.PATCH`.
+- Version rollover caps (authoritative):
+  - `PATCH` max: `30`
+  - `MINOR` max: `20`
+  - `MAJOR` max: `30`
+- Rollover behavior:
+  - If next `PATCH` would exceed `30`, set `PATCH=0` and increment `MINOR`.
+  - If next `MINOR` would exceed `20`, set `MINOR=0`, set `PATCH=0`, and increment `MAJOR`.
+  - If `MAJOR` would exceed `30`, treat as out-of-range and stop for manual version policy decision.
+- Examples:
+  - `0.7.30` -> `0.8.0`
+  - `0.20.30` -> `1.0.0`
 - Version sync policy for meaningful releases (feature/fix/improve/removed):
   - Update `VERSION` first.
   - Add a matching top entry in `docs/CHANGELOG.md` (newest-first).
