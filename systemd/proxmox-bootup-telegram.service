@@ -1,0 +1,46 @@
+[Unit]
+Description=Send Telegram message on Proxmox boot
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+
+# ============================================================
+# Environment File
+# ============================================================
+# This service depends on:
+#   /root/.backup-config.env
+#
+# Required variables inside:
+#   BOT_TOKEN=your_telegram_bot_token
+#   CHAT_ID=your_chat_id
+#
+# This file is shared across:
+#   - backup-config.sh
+#   - shutdown-proxmox.sh
+#   - proxmox-boot-notify.sh
+#
+# Ensure:
+#   chmod 600 /root/.backup-config.env
+# ============================================================
+EnvironmentFile=/root/.backup-config.env
+
+# Prevent hanging
+TimeoutStartSec=30
+
+# Allow network stack to settle
+ExecStartPre=/bin/sleep 5
+
+# Boot notification script
+ExecStart=/usr/local/bin/proxmox-boot-notify.sh
+
+# Retry once if first attempt fails (network timing issues)
+ExecStartPost=/bin/bash -c 'sleep 10 && /usr/local/bin/proxmox-boot-notify.sh || true'
+
+# Logging (keep consistent with your logging strategy)
+StandardOutput=append:/var/log/proxmox_boot.log
+StandardError=append:/var/log/proxmox_boot.log
+
+[Install]
+WantedBy=multi-user.target
