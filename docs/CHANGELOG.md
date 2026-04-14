@@ -1,3 +1,8 @@
+## 0.7.14
+
+- improve: move GitHub remote selection and SSH auth/key validation earlier in guided install, before local repo directory/branch prompts.
+- fix: remove duplicate late-stage SSH auth check now that validation is completed upfront during guided setup.
+
 ## 0.7.13
 
 - improve: always display the node OpenSSH public key during guided GitHub SSH setup, generating it first if missing.

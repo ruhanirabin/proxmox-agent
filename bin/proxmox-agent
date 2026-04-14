@@ -569,8 +569,6 @@ guided_env_setup() {
   ui_info "Configure backup repository settings."
   ui_info "GitHub setup guidance:"
   print_repo_url_guidance
-  repo_dir="$(prompt_value "Backup local repo directory" "$repo_dir")"
-  repo_branch="$(prompt_value "Backup git branch" "$repo_branch")"
   remote_url="$(prompt_value "Git remote URL (SSH or HTTPS)" "$remote_url")"
   while true; do
     if [ -z "$remote_url" ]; then
@@ -595,9 +593,16 @@ guided_env_setup() {
   done
   if is_ssh_remote_url "$remote_url"; then
     ui_ok "GitHub remote URL accepted (SSH)."
+    ui_info "Validating GitHub SSH authentication before continuing."
+    if ! guided_github_auth "$remote_url"; then
+      return 1
+    fi
   else
     ui_ok "GitHub remote URL accepted (HTTPS)."
+    ui_info "HTTPS remote selected; SSH key/auth validation skipped."
   fi
+  repo_dir="$(prompt_value "Backup local repo directory" "$repo_dir")"
+  repo_branch="$(prompt_value "Backup git branch" "$repo_branch")"
   retention_days="$(prompt_value "Log retention days" "$retention_days")"
 
   ui_info "Configure notifications."
@@ -1334,7 +1339,6 @@ cmd_install() {
         rc=1
       fi
     fi
-    [ "$rc" -eq 0 ] && guided_github_auth "${GIT_REMOTE_URL:-}" || rc=1
     [ "$rc" -eq 0 ] && configure_repo_remote_if_needed
     [ "$rc" -eq 0 ] && validate_git_remote_access || rc=1
     [ "$rc" -eq 0 ] && disable_legacy_units
