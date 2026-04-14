@@ -1,3 +1,10 @@
+## 0.7.21
+
+- fix: skip `git pull --rebase` on backup when `origin/<branch>` does not exist yet, allowing first-time branch push.
+- fix: avoid backup tag collisions by auto-suffixing duplicate minute-based tag names.
+- fix: make doctor SSH auth result conditional on remote mode (`SSH` validated, `HTTPS` skipped).
+- fix: apply tolerant env parse behavior consistently when `ENV_FILE` is explicitly set.
+
 ## 0.7.20
 
 - fix: shell-escape env values when writing installer settings so commit author names with spaces are saved safely.

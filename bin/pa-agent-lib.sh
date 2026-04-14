@@ -89,11 +89,22 @@ pa_load_version() {
 }
 
 pa_load_env() {
-  if [ -n "${ENV_FILE:-}" ]; then
-    if [ -f "$ENV_FILE" ]; then
-      # shellcheck disable=SC1090
-      source "$ENV_FILE"
+  local source_rc
+  pa_source_env_file() {
+    local file="$1"
+    [ -f "$file" ] || return 0
+    # shellcheck disable=SC1090
+    set +e
+    source "$file"
+    source_rc=$?
+    set -e
+    if [ "$source_rc" -ne 0 ]; then
+      echo "[!] Warning: failed to fully parse $file (rc=$source_rc). Continue with loaded values and fix invalid lines." >&2
     fi
+  }
+
+  if [ -n "${ENV_FILE:-}" ]; then
+    pa_source_env_file "$ENV_FILE"
     return 0
   fi
 
@@ -105,16 +116,7 @@ pa_load_env() {
     ENV_FILE="$PA_ENV_FILE_DEFAULT"
   fi
 
-  if [ -f "$ENV_FILE" ]; then
-    # shellcheck disable=SC1090
-    set +e
-    source "$ENV_FILE"
-    local source_rc=$?
-    set -e
-    if [ "$source_rc" -ne 0 ]; then
-      echo "[!] Warning: failed to fully parse $ENV_FILE (rc=$source_rc). Continue with loaded values and fix invalid lines." >&2
-    fi
-  fi
+  pa_source_env_file "$ENV_FILE"
 }
 
 pa_log_retention_days() {

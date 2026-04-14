@@ -1607,10 +1607,16 @@ cmd_doctor() {
   doctor_check_service_state pa-boot-notify.service
   doctor_check_active_state pa-backup-config.timer
 
-  if validate_github_ssh; then
-    doctor_add_result "ssh_github" "ok" "authenticated"
+  if is_ssh_remote_url "${GIT_REMOTE_URL:-}"; then
+    if validate_github_ssh; then
+      doctor_add_result "ssh_github" "ok" "authenticated"
+    else
+      doctor_add_result "ssh_github" "fail" "authentication failed"
+    fi
+  elif is_https_remote_url "${GIT_REMOTE_URL:-}"; then
+    doctor_add_result "ssh_github" "ok" "skipped (HTTPS remote)"
   else
-    doctor_add_result "ssh_github" "fail" "authentication failed"
+    doctor_add_result "ssh_github" "ok" "skipped (no SSH remote configured)"
   fi
 
   if validate_git_remote_access 1; then

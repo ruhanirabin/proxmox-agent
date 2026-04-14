@@ -100,10 +100,23 @@ echo "=== Full diff ==="
 echo "$FULL_DIFF"
 
 git commit -m "$COMMIT_MSG"
-git pull --rebase origin "$REPO_BRANCH"
+if git -C "$REPO_DIR" remote get-url origin >/dev/null 2>&1; then
+  if git -C "$REPO_DIR" ls-remote --exit-code --heads origin "$REPO_BRANCH" >/dev/null 2>&1; then
+    git pull --rebase origin "$REPO_BRANCH"
+  else
+    echo "Remote branch origin/$REPO_BRANCH does not exist yet; skipping rebase pull."
+  fi
+fi
 git push origin "$REPO_BRANCH"
 
-TAG_NAME="$NODE_NAME-backup-$(date '+%Y-%m-%d-%H%M')"
+TAG_BASE="$NODE_NAME-backup-$(date '+%Y-%m-%d-%H%M')"
+TAG_NAME="$TAG_BASE"
+tag_suffix=1
+while git rev-parse -q --verify "refs/tags/$TAG_NAME" >/dev/null 2>&1 || \
+      git ls-remote --exit-code --tags origin "refs/tags/$TAG_NAME" >/dev/null 2>&1; do
+  TAG_NAME="${TAG_BASE}-${tag_suffix}"
+  tag_suffix=$((tag_suffix + 1))
+done
 git tag "$TAG_NAME"
 git push origin "$TAG_NAME"
 
