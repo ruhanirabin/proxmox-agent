@@ -1,0 +1,804 @@
+#!/bin/bash
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+VERSION_FILE="$REPO_ROOT/VERSION"
+LIB_FILE="${LIB_FILE:-/usr/local/bin/pa-agent-lib.sh}"
+[ -f "$LIB_FILE" ] || LIB_FILE="$SCRIPT_DIR/pa-agent-lib.sh"
+# shellcheck disable=SC1090
+source "$LIB_FILE"
+
+PA_BIN_TARGET="/usr/local/bin"
+PA_SYSTEMD_TARGET="/etc/systemd/system"
+PA_ENV_TARGET="/root/.pa-agent.env"
+PA_ENV_LEGACY="/root/.backup-config.env"
+PA_ENV_EXAMPLE_SOURCE="$REPO_ROOT/env/pa-agent.env.example"
+PA_RUNTIME_VERSION_FILE="$PA_BIN_TARGET/pa-agent-version"
+PA_RUNTIME_VERSION_LEGACY="$PA_BIN_TARGET/proxmox-agent-version"
+PA_BACKUP_DIR_BASE="/root/proxmox-agent-backups"
+PA_UPGRADE_LOG="/var/log/proxmox-agent-upgrade.log"
+
+PA_CANONICAL_BIN_FILES=(
+  "pa-backup-config.sh"
+  "pa-boot-notify.sh"
+  "pa-send-telegram.sh"
+  "pa-send-webhook.sh"
+  "pa-shutdown-proxmox.sh"
+  "pa-agent-lib.sh"
+  "proxmox-agent"
+  "pa-agent-version"
+)
+
+PA_CANONICAL_UNIT_FILES=(
+  "pa-backup-config.service"
+  "pa-backup-config.timer"
+  "pa-boot-notify.service"
+  "pa-shutdown-proxmox.service"
+)
+
+PA_LEGACY_BIN_FILES=(
+  "backup-config.sh"
+  "proxmox-boot-notify.sh"
+  "send_telegram.sh"
+  "send_webhook.sh"
+  "shutdown-proxmox.sh"
+  "proxmox-agent-lib.sh"
+  "proxmox-agent-version"
+)
+
+PA_LEGACY_UNIT_FILES=(
+  "backup-config.service"
+  "backup-config.timer"
+  "proxmox-bootup-telegram.service"
+  "shutdown-proxmox.service"
+)
+
+get_repo_version() {
+  if [ -f "$VERSION_FILE" ]; then
+    tr -d '[:space:]' < "$VERSION_FILE"
+  else
+    echo "unknown"
+  fi
+}
+
+prompt_yes_no() {
+  local prompt="${1:-Continue?}"
+  local default="${2:-y}"
+  local answer
+  while true; do
+    if [ "$default" = "y" ]; then
+      read -r -p "$prompt [Y/n]: " answer
+      answer="${answer:-y}"
+    else
+      read -r -p "$prompt [y/N]: " answer
+      answer="${answer:-n}"
+    fi
+    case "$(echo "$answer" | tr '[:upper:]' '[:lower:]')" in
+      y|yes) return 0 ;;
+      n|no) return 1 ;;
+    esac
+  done
+}
+
+set_env_kv() {
+  local file="$1"
+  local key="$2"
+  local value="$3"
+  touch "$file"
+  if grep -qE "^${key}=" "$file"; then
+    sed -i "s#^${key}=.*#${key}=${value}#g" "$file"
+  else
+    printf '\n%s=%s\n' "$key" "$value" >> "$file"
+  fi
+}
+
+preflight_checks() {
+  local missing=0
+  local c
+  for c in bash git curl ssh ssh-keygen systemctl; do
+    if command -v "$c" >/dev/null 2>&1; then
+      echo "OK   dependency: $c"
+    else
+      echo "MISS dependency: $c"
+      missing=1
+    fi
+  done
+  if [ "$missing" -ne 0 ]; then
+    echo "Install blocked: missing required dependencies."
+    return 1
+  fi
+}
+
+require_root() {
+  if [ "${EUID:-$(id -u)}" -ne 0 ]; then
+    echo "This command must be run as root."
+    exit 1
+  fi
+}
+
+write_runtime_version() {
+  local v="$1"
+  # Runtime version file is generated from repo VERSION during install/upgrade.
+  cat > "$PA_RUNTIME_VERSION_FILE" <<EOF
+#!/bin/bash
+AGENT_VERSION="$v"
+export AGENT_VERSION
+EOF
+  chmod 755 "$PA_RUNTIME_VERSION_FILE"
+}
+
+generate_ssh_key_if_missing() {
+  if [ ! -f /root/.ssh/id_ed25519 ]; then
+    mkdir -p /root/.ssh
+    chmod 700 /root/.ssh
+    ssh-keygen -t ed25519 -C "proxmox-agent" -f /root/.ssh/id_ed25519 -N ""
+    chmod 600 /root/.ssh/id_ed25519
+    chmod 644 /root/.ssh/id_ed25519.pub
+  fi
+}
+
+validate_github_ssh() {
+  local output
+  set +e
+  output="$(ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o ConnectTimeout=10 -T git@github.com 2>&1)"
+  set -e
+  echo "$output" | grep -qi "successfully authenticated"
+}
+
+configure_repo_remote_if_needed() {
+  local repo_dir branch remote_from_env
+  pa_load_env
+  repo_dir="${REPO_DIR:-/root/pve-config}"
+  branch="${REPO_BRANCH:-main}"
+  remote_from_env="${GIT_REMOTE_URL:-}"
+
+  mkdir -p "$repo_dir"
+  if [ ! -d "$repo_dir/.git" ]; then
+    git -C "$repo_dir" init -b "$branch"
+  fi
+
+  if [ -n "$remote_from_env" ]; then
+    if git -C "$repo_dir" remote get-url origin >/dev/null 2>&1; then
+      git -C "$repo_dir" remote set-url origin "$remote_from_env"
+    else
+      git -C "$repo_dir" remote add origin "$remote_from_env"
+    fi
+  fi
+}
+
+validate_git_remote_access() {
+  local repo_dir quiet
+  quiet="${1:-0}"
+  pa_load_env
+  repo_dir="${REPO_DIR:-/root/pve-config}"
+
+  if ! git -C "$repo_dir" remote get-url origin >/dev/null 2>&1; then
+    [ "$quiet" = "1" ] || echo "Missing git origin remote in $repo_dir. Set GIT_REMOTE_URL in $PA_ENV_TARGET or add origin manually."
+    return 1
+  fi
+
+  if ! git -C "$repo_dir" ls-remote origin >/dev/null 2>&1; then
+    [ "$quiet" = "1" ] || echo "Cannot access git remote from $repo_dir."
+    return 1
+  fi
+
+  return 0
+}
+
+detect_legacy_artifacts() {
+  local f
+  for f in "${PA_LEGACY_BIN_FILES[@]}"; do
+    [ -e "$PA_BIN_TARGET/$f" ] && return 0
+  done
+  for f in "${PA_LEGACY_UNIT_FILES[@]}"; do
+    [ -e "$PA_SYSTEMD_TARGET/$f" ] && return 0
+  done
+  [ -e "$PA_ENV_LEGACY" ] && return 0
+  [ -e "$PA_RUNTIME_VERSION_LEGACY" ] && return 0
+  return 1
+}
+
+count_legacy_artifacts() {
+  local c=0 f
+  for f in "${PA_LEGACY_BIN_FILES[@]}"; do [ -e "$PA_BIN_TARGET/$f" ] && c=$((c + 1)); done
+  for f in "${PA_LEGACY_UNIT_FILES[@]}"; do [ -e "$PA_SYSTEMD_TARGET/$f" ] && c=$((c + 1)); done
+  [ -e "$PA_ENV_LEGACY" ] && c=$((c + 1))
+  [ -e "$PA_RUNTIME_VERSION_LEGACY" ] && c=$((c + 1))
+  echo "$c"
+}
+
+capture_unit_states() {
+  local backup_dir="$1"
+  local unit
+  : > "$backup_dir/unit-states.txt"
+  for unit in "${PA_CANONICAL_UNIT_FILES[@]}" "${PA_LEGACY_UNIT_FILES[@]}"; do
+    if systemctl is-enabled "$unit" >/dev/null 2>&1; then
+      echo "$unit" >> "$backup_dir/unit-states.txt"
+    fi
+  done
+}
+
+disable_all_managed_units() {
+  local unit
+  for unit in "${PA_CANONICAL_UNIT_FILES[@]}" "${PA_LEGACY_UNIT_FILES[@]}"; do
+    systemctl stop "$unit" >/dev/null 2>&1 || true
+    systemctl disable "$unit" >/dev/null 2>&1 || true
+  done
+}
+
+restore_unit_states() {
+  local backup_dir="$1"
+  local unit
+  disable_all_managed_units
+  if [ -f "$backup_dir/unit-states.txt" ]; then
+    while IFS= read -r unit; do
+      [ -n "$unit" ] || continue
+      systemctl enable "$unit" >/dev/null 2>&1 || true
+      [[ "$unit" == *.timer ]] && systemctl start "$unit" >/dev/null 2>&1 || true
+    done < "$backup_dir/unit-states.txt"
+  fi
+}
+
+cleanup_managed_artifacts() {
+  local f
+  for f in "${PA_CANONICAL_BIN_FILES[@]}" "${PA_LEGACY_BIN_FILES[@]}"; do
+    rm -f "$PA_BIN_TARGET/$f"
+  done
+  for f in "${PA_CANONICAL_UNIT_FILES[@]}" "${PA_LEGACY_UNIT_FILES[@]}"; do
+    rm -f "$PA_SYSTEMD_TARGET/$f"
+  done
+  rm -f "$PA_ENV_TARGET" "$PA_ENV_LEGACY"
+}
+
+backup_current_install() {
+  local backup_dir="$1"
+  local f
+  mkdir -p "$backup_dir/bin" "$backup_dir/systemd" "$backup_dir/env"
+
+  for f in "${PA_CANONICAL_BIN_FILES[@]}" "${PA_LEGACY_BIN_FILES[@]}"; do
+    [ -f "$PA_BIN_TARGET/$f" ] && cp -a "$PA_BIN_TARGET/$f" "$backup_dir/bin/$f"
+  done
+
+  for f in "${PA_CANONICAL_UNIT_FILES[@]}" "${PA_LEGACY_UNIT_FILES[@]}"; do
+    [ -f "$PA_SYSTEMD_TARGET/$f" ] && cp -a "$PA_SYSTEMD_TARGET/$f" "$backup_dir/systemd/$f"
+  done
+
+  [ -f "$PA_ENV_TARGET" ] && cp -a "$PA_ENV_TARGET" "$backup_dir/env/.pa-agent.env"
+  [ -f "$PA_ENV_LEGACY" ] && cp -a "$PA_ENV_LEGACY" "$backup_dir/env/.backup-config.env"
+
+  capture_unit_states "$backup_dir"
+}
+
+restore_from_backup() {
+  local backup_dir="$1"
+  local f
+
+  disable_all_managed_units
+  cleanup_managed_artifacts
+
+  for f in "$backup_dir"/bin/*; do
+    [ -f "$f" ] || continue
+    install -m 755 "$f" "$PA_BIN_TARGET/$(basename "$f")"
+  done
+  for f in "$backup_dir"/systemd/*; do
+    [ -f "$f" ] || continue
+    install -m 644 "$f" "$PA_SYSTEMD_TARGET/$(basename "$f")"
+  done
+
+  [ -f "$backup_dir/env/.pa-agent.env" ] && install -m 600 "$backup_dir/env/.pa-agent.env" "$PA_ENV_TARGET"
+  [ -f "$backup_dir/env/.backup-config.env" ] && install -m 600 "$backup_dir/env/.backup-config.env" "$PA_ENV_LEGACY"
+
+  systemctl daemon-reload
+  restore_unit_states "$backup_dir"
+}
+
+migrate_env_file() {
+  if [ ! -f "$PA_ENV_TARGET" ] && [ -f "$PA_ENV_LEGACY" ]; then
+    cp -a "$PA_ENV_LEGACY" "$PA_ENV_TARGET"
+    chmod 600 "$PA_ENV_TARGET"
+  fi
+}
+
+disable_legacy_units() {
+  local unit
+  for unit in "${PA_LEGACY_UNIT_FILES[@]}"; do
+    systemctl stop "$unit" >/dev/null 2>&1 || true
+    systemctl disable "$unit" >/dev/null 2>&1 || true
+  done
+}
+
+remove_legacy_artifacts() {
+  local f
+  for f in "${PA_LEGACY_BIN_FILES[@]}"; do
+    rm -f "$PA_BIN_TARGET/$f"
+  done
+  for f in "${PA_LEGACY_UNIT_FILES[@]}"; do
+    rm -f "$PA_SYSTEMD_TARGET/$f"
+  done
+  rm -f "$PA_ENV_LEGACY" "$PA_RUNTIME_VERSION_LEGACY"
+}
+
+install_canonical_files_from_repo() {
+  local f
+  local bin_files=(
+    "pa-backup-config.sh"
+    "pa-boot-notify.sh"
+    "pa-send-telegram.sh"
+    "pa-send-webhook.sh"
+    "pa-shutdown-proxmox.sh"
+    "pa-agent-lib.sh"
+    "proxmox-agent"
+  )
+  local unit_files=(
+    "pa-backup-config.service"
+    "pa-backup-config.timer"
+    "pa-boot-notify.service"
+    "pa-shutdown-proxmox.service"
+  )
+
+  mkdir -p "$PA_BIN_TARGET" "$PA_SYSTEMD_TARGET"
+
+  for f in "${bin_files[@]}"; do
+    install -m 755 "$REPO_ROOT/bin/$f" "$PA_BIN_TARGET/$f"
+  done
+  for f in "${unit_files[@]}"; do
+    install -m 644 "$REPO_ROOT/systemd/$f" "$PA_SYSTEMD_TARGET/$f"
+  done
+  if [ ! -f "$PA_ENV_TARGET" ] && [ -f "$PA_ENV_EXAMPLE_SOURCE" ]; then
+    install -m 600 "$PA_ENV_EXAMPLE_SOURCE" "$PA_ENV_TARGET"
+  fi
+}
+
+install_canonical_files_from_source_dir() {
+  local srcdir="$1"
+  local f
+  local bin_files=(
+    "pa-backup-config.sh"
+    "pa-boot-notify.sh"
+    "pa-send-telegram.sh"
+    "pa-send-webhook.sh"
+    "pa-shutdown-proxmox.sh"
+    "pa-agent-lib.sh"
+    "proxmox-agent"
+  )
+  local unit_files=(
+    "pa-backup-config.service"
+    "pa-backup-config.timer"
+    "pa-boot-notify.service"
+    "pa-shutdown-proxmox.service"
+  )
+
+  mkdir -p "$PA_BIN_TARGET" "$PA_SYSTEMD_TARGET"
+
+  for f in "${bin_files[@]}"; do
+    install -m 755 "$srcdir/bin/$f" "$PA_BIN_TARGET/$f"
+  done
+  for f in "${unit_files[@]}"; do
+    install -m 644 "$srcdir/systemd/$f" "$PA_SYSTEMD_TARGET/$f"
+  done
+  if [ ! -f "$PA_ENV_TARGET" ] && [ -f "$srcdir/env/pa-agent.env.example" ]; then
+    install -m 600 "$srcdir/env/pa-agent.env.example" "$PA_ENV_TARGET"
+  fi
+}
+
+enable_canonical_services() {
+  systemctl daemon-reload
+  systemctl enable pa-backup-config.timer pa-shutdown-proxmox.service pa-boot-notify.service
+  systemctl start pa-backup-config.timer || true
+}
+
+doctor_add_result() {
+  local key="$1"
+  local status="$2"
+  local message="$3"
+  DOCTOR_KEYS+=("$key")
+  DOCTOR_STATUS+=("$status")
+  DOCTOR_MSG+=("$message")
+  [ "$status" = "ok" ] || DOCTOR_FAILED=1
+}
+
+doctor_check_binary() {
+  local name="$1"
+  if command -v "$name" >/dev/null 2>&1; then
+    doctor_add_result "bin:$name" "ok" "found"
+  else
+    doctor_add_result "bin:$name" "fail" "missing"
+  fi
+}
+
+doctor_check_exec() {
+  local path="$1"
+  if [ -x "$path" ]; then
+    doctor_add_result "exec:$path" "ok" "executable"
+  else
+    doctor_add_result "exec:$path" "fail" "not executable"
+  fi
+}
+
+doctor_check_service_state() {
+  local unit="$1"
+  if systemctl is-enabled "$unit" >/dev/null 2>&1; then
+    doctor_add_result "enabled:$unit" "ok" "enabled"
+  else
+    doctor_add_result "enabled:$unit" "fail" "not enabled"
+  fi
+}
+
+doctor_check_active_state() {
+  local unit="$1"
+  if systemctl is-active "$unit" >/dev/null 2>&1; then
+    doctor_add_result "active:$unit" "ok" "active"
+  else
+    doctor_add_result "active:$unit" "fail" "not active"
+  fi
+}
+
+doctor_emit_plain() {
+  local i
+  for ((i=0; i<${#DOCTOR_KEYS[@]}; i++)); do
+    echo "${DOCTOR_STATUS[$i]} ${DOCTOR_KEYS[$i]} ${DOCTOR_MSG[$i]}"
+  done
+  if [ "$DOCTOR_FAILED" -eq 0 ]; then
+    echo "doctor: OK"
+  else
+    echo "doctor: FAIL"
+  fi
+}
+
+doctor_emit_json() {
+  local i first=1
+  printf '{"ok":%s,"results":[' "$( [ "$DOCTOR_FAILED" -eq 0 ] && echo "true" || echo "false" )"
+  for ((i=0; i<${#DOCTOR_KEYS[@]}; i++)); do
+    [ "$first" -eq 1 ] || printf ','
+    first=0
+    printf '{"key":"%s","status":"%s","message":"%s"}' \
+      "$(pa_json_escape "${DOCTOR_KEYS[$i]}")" \
+      "$(pa_json_escape "${DOCTOR_STATUS[$i]}")" \
+      "$(pa_json_escape "${DOCTOR_MSG[$i]}")"
+  done
+  printf ']}'
+  echo
+}
+
+cmd_install() {
+  require_root
+  echo "Proxmox Agent installer starting..."
+
+  preflight_checks || exit 1
+
+  local ts backup_dir legacy_before migrated
+  ts="$(date +%Y%m%d-%H%M%S)"
+  backup_dir="$PA_BACKUP_DIR_BASE/install-$ts"
+  mkdir -p "$PA_BACKUP_DIR_BASE"
+  backup_current_install "$backup_dir"
+
+  legacy_before=0
+  detect_legacy_artifacts && legacy_before=1
+  migrated=0
+
+  pa_load_version
+  if [ "${AGENT_VERSION:-unknown}" != "unknown" ]; then
+    echo "Detected existing installation version: v$AGENT_VERSION"
+    if ! prompt_yes_no "Proceed with reinstall/upgrade on this node?" "y"; then
+      echo "Install cancelled."
+      exit 0
+    fi
+  fi
+  if [ "$legacy_before" -eq 1 ]; then
+    echo "Detected legacy artifacts. Installer will migrate them to pa-* naming."
+  fi
+
+  set +e
+  install_canonical_files_from_repo
+  local rc=$?
+  if [ "$rc" -eq 0 ]; then
+    migrate_env_file
+    write_runtime_version "$(get_repo_version)"
+    generate_ssh_key_if_missing
+
+    echo "Public SSH key (add to GitHub):"
+    cat /root/.ssh/id_ed25519.pub
+    echo
+    read -r -p "After adding the key to GitHub, press ENTER to continue..."
+
+    validate_github_ssh || rc=1
+    [ "$rc" -eq 0 ] && configure_repo_remote_if_needed
+    if [ "$rc" -eq 0 ]; then
+      pa_load_env
+      if [ -z "${GIT_REMOTE_URL:-}" ] && [ ! -f "$PA_ENV_TARGET" -o -f "$PA_ENV_TARGET" ]; then
+        echo "GIT_REMOTE_URL is not set in $PA_ENV_TARGET."
+        read -r -p "Enter Git remote URL (ssh format, e.g. git@github.com:USER/REPO.git): " user_remote
+        if [ -n "$user_remote" ]; then
+          set_env_kv "$PA_ENV_TARGET" "GIT_REMOTE_URL" "$user_remote"
+        fi
+      fi
+      configure_repo_remote_if_needed
+      validate_git_remote_access || rc=1
+    fi
+    [ "$rc" -eq 0 ] && disable_legacy_units
+    [ "$rc" -eq 0 ] && enable_canonical_services || rc=1
+    if [ "$rc" -eq 0 ] && [ "$legacy_before" -eq 1 ]; then
+      remove_legacy_artifacts
+      systemctl daemon-reload
+      migrated=1
+    fi
+    [ "$rc" -eq 0 ] && "$PA_BIN_TARGET/proxmox-agent" doctor >/dev/null 2>&1 || rc=1
+  fi
+  set -e
+
+  if [ "$rc" -ne 0 ]; then
+    restore_from_backup "$backup_dir"
+    echo "Install failed and was rolled back from $backup_dir."
+    exit 1
+  fi
+
+  pa_load_version
+  pa_load_env
+  pa_send_webhook "install" "success" "Install completed" "Proxmox agent installed. migrated_legacy=$migrated" || true
+  echo "Install complete (agent v$(get_repo_version), migrated_legacy=$migrated)."
+  echo "Next steps:"
+  echo "1) Verify: proxmox-agent doctor --json"
+  echo "2) Test backup: proxmox-agent backup"
+  echo "3) Review timer: systemctl status pa-backup-config.timer"
+}
+
+cmd_doctor() {
+  local json=0
+  if [ "${1:-}" = "--json" ]; then
+    json=1
+  fi
+
+  DOCTOR_KEYS=()
+  DOCTOR_STATUS=()
+  DOCTOR_MSG=()
+  DOCTOR_FAILED=0
+
+  doctor_check_binary git
+  doctor_check_binary curl
+  doctor_check_binary ssh
+  doctor_check_binary systemctl
+
+  pa_load_version
+  if [ "${AGENT_VERSION:-unknown}" = "unknown" ]; then
+    doctor_add_result "agent_version" "fail" "runtime version missing"
+  else
+    doctor_add_result "agent_version" "ok" "$AGENT_VERSION"
+  fi
+
+  if [ -f "$PA_ENV_TARGET" ]; then
+    doctor_add_result "env_file" "ok" "$PA_ENV_TARGET"
+  else
+    doctor_add_result "env_file" "fail" "missing $PA_ENV_TARGET"
+  fi
+
+  local legacy_count
+  legacy_count="$(count_legacy_artifacts)"
+  if [ "$legacy_count" -eq 0 ]; then
+    doctor_add_result "migration_legacy_artifacts" "ok" "none"
+  else
+    doctor_add_result "migration_legacy_artifacts" "fail" "$legacy_count legacy artifacts still present"
+  fi
+
+  pa_load_env
+  if pa_bool_true "${WEBHOOK_ENABLED:-false}"; then
+    if [[ "${WEBHOOK_URL:-}" =~ ^https?:// ]]; then
+      doctor_add_result "webhook_url" "ok" "configured"
+    else
+      doctor_add_result "webhook_url" "fail" "invalid or missing WEBHOOK_URL"
+    fi
+  else
+    doctor_add_result "webhook_enabled" "ok" "disabled"
+  fi
+
+  if [ -n "${BOT_TOKEN:-}" ] && [ -n "${CHAT_ID:-}" ]; then
+    doctor_add_result "telegram" "ok" "configured"
+  else
+    doctor_add_result "telegram" "ok" "not configured"
+  fi
+
+  doctor_check_exec "$PA_BIN_TARGET/pa-backup-config.sh"
+  doctor_check_exec "$PA_BIN_TARGET/pa-send-telegram.sh"
+  doctor_check_exec "$PA_BIN_TARGET/pa-send-webhook.sh"
+  doctor_check_exec "$PA_BIN_TARGET/pa-shutdown-proxmox.sh"
+
+  doctor_check_service_state pa-backup-config.timer
+  doctor_check_service_state pa-shutdown-proxmox.service
+  doctor_check_service_state pa-boot-notify.service
+  doctor_check_active_state pa-backup-config.timer
+
+  if validate_github_ssh; then
+    doctor_add_result "ssh_github" "ok" "authenticated"
+  else
+    doctor_add_result "ssh_github" "fail" "authentication failed"
+  fi
+
+  if validate_git_remote_access 1; then
+    doctor_add_result "git_remote" "ok" "reachable"
+  else
+    doctor_add_result "git_remote" "fail" "unreachable"
+  fi
+
+  if [ "$json" -eq 1 ]; then
+    doctor_emit_json
+  else
+    doctor_emit_plain
+  fi
+
+  pa_send_webhook "doctor" "$( [ "$DOCTOR_FAILED" -eq 0 ] && echo success || echo failed )" \
+    "Doctor completed" \
+    "Doctor run finished with status $( [ "$DOCTOR_FAILED" -eq 0 ] && echo ok || echo fail )." || true
+
+  [ "$DOCTOR_FAILED" -eq 0 ]
+}
+
+cmd_backup() {
+  require_root
+  "$PA_BIN_TARGET/pa-backup-config.sh"
+}
+
+cmd_notify() {
+  require_root
+  local msg="${1:-Proxmox agent notification test}"
+  if "$PA_BIN_TARGET/pa-send-telegram.sh" "$msg"; then
+    echo "Telegram notification sent."
+  else
+    echo "Telegram notification failed."
+    exit 1
+  fi
+}
+
+resolve_latest_tag() {
+  local source="$1"
+  git ls-remote --tags --refs "$source" \
+    | awk '{print $2}' \
+    | sed 's#refs/tags/##' \
+    | sort -V \
+    | tail -n 1
+}
+
+extract_edge_source() {
+  local source="$1"
+  local tmpdir="$2"
+  local archive="$tmpdir/edge-archive"
+  mkdir -p "$tmpdir"
+  curl -fsSL "$source" -o "$archive"
+
+  if [[ "$source" =~ \.zip($|\?) ]]; then
+    unzip -q "$archive" -d "$tmpdir/extracted"
+  else
+    mkdir -p "$tmpdir/extracted"
+    tar -xf "$archive" -C "$tmpdir/extracted"
+  fi
+
+  find "$tmpdir/extracted" -type f -name VERSION -printf '%h\n' | head -n 1
+}
+
+cmd_upgrade() {
+  require_root
+
+  pa_load_version
+  pa_load_env
+
+  local channel target source
+  channel="${AGENT_UPDATE_CHANNEL:-stable}"
+  target=""
+  source="${AGENT_UPDATE_SOURCE:-}"
+
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --channel) channel="${2:-}"; shift 2 ;;
+      --target) target="${2:-}"; shift 2 ;;
+      *) echo "Unknown option: $1"; exit 1 ;;
+    esac
+  done
+
+  if [ -z "$source" ]; then
+    echo "AGENT_UPDATE_SOURCE is required for upgrade."
+    exit 1
+  fi
+
+  local tmpdir srcdir target_version current_version ts backup_dir rc legacy_before migrated
+  tmpdir="$(mktemp -d)"
+  ts="$(date +%Y%m%d-%H%M%S)"
+  backup_dir="$PA_BACKUP_DIR_BASE/upgrade-$ts"
+  mkdir -p "$PA_BACKUP_DIR_BASE"
+  backup_current_install "$backup_dir"
+
+  current_version="${AGENT_VERSION:-unknown}"
+  legacy_before=0
+  migrated=0
+  detect_legacy_artifacts && legacy_before=1
+
+  mkdir -p "$(dirname "$PA_UPGRADE_LOG")"
+  touch "$PA_UPGRADE_LOG"
+
+  if [ "$channel" = "stable" ]; then
+    [ -n "$target" ] || target="$(resolve_latest_tag "$source")"
+    [ -n "$target" ] || { echo "Cannot resolve stable target tag."; exit 1; }
+    git clone --depth 1 --branch "$target" "$source" "$tmpdir/src" >/dev/null 2>&1
+    srcdir="$tmpdir/src"
+  elif [ "$channel" = "edge" ]; then
+    srcdir="$(extract_edge_source "$source" "$tmpdir")"
+    [ -n "$srcdir" ] || { echo "Cannot extract edge source."; exit 1; }
+  else
+    echo "Invalid channel: $channel"
+    exit 1
+  fi
+
+  [ -f "$srcdir/VERSION" ] || { echo "Upgrade source missing VERSION file."; exit 1; }
+  target_version="$(tr -d '[:space:]' < "$srcdir/VERSION")"
+
+  if [ "$current_version" = "$target_version" ]; then
+    echo "Already up to date (v$current_version)."
+    exit 0
+  fi
+
+  echo "$(date -Is) channel=$channel source=$source current=$current_version target=$target_version backup=$backup_dir legacy_before=$legacy_before" >> "$PA_UPGRADE_LOG"
+
+  set +e
+  install_canonical_files_from_source_dir "$srcdir"
+  rc=$?
+  if [ "$rc" -eq 0 ]; then
+    migrate_env_file
+    write_runtime_version "$target_version"
+    disable_legacy_units
+    enable_canonical_services || rc=1
+    if [ "$rc" -eq 0 ] && [ "$legacy_before" -eq 1 ]; then
+      remove_legacy_artifacts
+      systemctl daemon-reload
+      migrated=1
+    fi
+    [ "$rc" -eq 0 ] && "$PA_BIN_TARGET/proxmox-agent" doctor >/dev/null 2>&1 || rc=1
+  fi
+  set -e
+
+  if [ "$rc" -ne 0 ]; then
+    restore_from_backup "$backup_dir"
+    echo "Post-upgrade validation failed; rolled back from $backup_dir."
+    exit 1
+  fi
+
+  pa_load_version
+  pa_load_env
+  pa_send_webhook "install" "success" "Upgrade completed" \
+    "Upgraded from v$current_version to v$target_version via $channel; migrated_legacy=$migrated." || true
+
+  echo "$(date -Is) status=success migrated_legacy=$migrated" >> "$PA_UPGRADE_LOG"
+  echo "Upgrade complete: v$current_version -> v$target_version ($channel, migrated_legacy=$migrated)."
+}
+
+usage() {
+  cat <<EOF
+Usage: proxmox-agent <command> [options]
+
+Commands:
+  install                 Install scripts, units, version file, and validate setup
+  doctor [--json]         Run health checks
+  backup                  Run backup script manually
+  notify [message]        Send Telegram test message
+  upgrade [--channel stable|edge] [--target <tag>]
+EOF
+}
+
+main() {
+  local cmd="${1:-}"
+  shift || true
+
+  case "$cmd" in
+    install) cmd_install "$@" ;;
+    doctor) cmd_doctor "$@" ;;
+    backup) cmd_backup "$@" ;;
+    notify) cmd_notify "$@" ;;
+    upgrade) cmd_upgrade "$@" ;;
+    ""|-h|--help|help) usage ;;
+    *)
+      echo "Unknown command: $cmd"
+      usage
+      exit 1
+      ;;
+  esac
+}
+
+main "$@"

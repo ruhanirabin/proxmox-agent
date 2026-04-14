@@ -1,0 +1,8 @@
+*.sh text eol=lf
+install.sh text eol=lf
+*.service text eol=lf
+*.timer text eol=lf
+VERSION text eol=lf
+docs/*.md text eol=lf
+env/*.example text eol=lf
+bin/proxmox-agent text eol=lf

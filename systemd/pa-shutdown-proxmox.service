@@ -7,7 +7,7 @@ Wants=network-online.target
 
 [Service]
 Type=oneshot
-ExecStart=/usr/local/bin/shutdown-proxmox.sh
+ExecStart=/usr/local/bin/pa-shutdown-proxmox.sh
 TimeoutStartSec=900
 StandardOutput=journal
 StandardError=journal

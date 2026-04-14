@@ -1,0 +1,17 @@
+[Unit]
+Description=Send Telegram message on Proxmox boot
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+EnvironmentFile=/root/.pa-agent.env
+TimeoutStartSec=30
+ExecStartPre=/bin/sleep 5
+ExecStart=/usr/local/bin/pa-boot-notify.sh
+ExecStartPost=/bin/bash -c 'sleep 10 && /usr/local/bin/pa-boot-notify.sh || true'
+StandardOutput=append:/var/log/pa-boot-notify.log
+StandardError=append:/var/log/pa-boot-notify.log
+
+[Install]
+WantedBy=multi-user.target

@@ -5,6 +5,7 @@ Description=Run Proxmox config backup periodically
 OnBootSec=5min
 OnCalendar=*-*-* 13:00:00
 OnUnitActiveSec=6h
+Unit=pa-backup-config.service
 RandomizedDelaySec=10min
 Persistent=true
 AccuracySec=1min
