@@ -9,7 +9,7 @@ PA_INSTALL_MODE="${PA_INSTALL_MODE:-auto}"
 PA_BANNER_FILE=""
 PA_CAN_COLOR=0
 
-if [ -t 1 ]; then
+if [ -t 1 ] && [ "${NO_COLOR:-}" = "" ] && [ "${TERM:-}" != "dumb" ]; then
   PA_CAN_COLOR=1
 fi
 
@@ -37,6 +37,15 @@ ICON_WARN="[!]"
 ICON_ERR="[x]"
 ICON_STEP="[>]"
 ICON_Q="[?]"
+
+if [ -t 1 ] && [ "${PA_UI_ASCII:-}" != "1" ] && locale charmap 2>/dev/null | grep -qi "utf-8"; then
+  ICON_INFO="ℹ"
+  ICON_OK="✔"
+  ICON_WARN="⚠"
+  ICON_ERR="✖"
+  ICON_STEP="➤"
+  ICON_Q="❯"
+fi
 
 ui_info() { echo "${C_CYAN}${ICON_INFO}${C_RESET} $*" >&2; }
 ui_ok() { echo "${C_GREEN}${ICON_OK}${C_RESET} $*" >&2; }
@@ -123,6 +132,102 @@ prompt_yes_no() {
   done
 }
 
+detect_pkg_manager() {
+  if command -v apt-get >/dev/null 2>&1; then
+    echo "apt"
+  elif command -v dnf >/dev/null 2>&1; then
+    echo "dnf"
+  elif command -v yum >/dev/null 2>&1; then
+    echo "yum"
+  elif command -v zypper >/dev/null 2>&1; then
+    echo "zypper"
+  elif command -v pacman >/dev/null 2>&1; then
+    echo "pacman"
+  elif command -v apk >/dev/null 2>&1; then
+    echo "apk"
+  else
+    echo ""
+  fi
+}
+
+map_cmds_to_packages() {
+  local pkg_manager="$1"
+  shift
+  local missing_cmds=("$@")
+  local -A seen=()
+  local cmd pkg
+  local packages=()
+  for cmd in "${missing_cmds[@]}"; do
+    pkg="$cmd"
+    case "$pkg_manager:$cmd" in
+      apt:ssh|apt:ssh-keygen) pkg="openssh-client" ;;
+      apt:systemctl) pkg="systemd" ;;
+      dnf:ssh|dnf:ssh-keygen|yum:ssh|yum:ssh-keygen|zypper:ssh|zypper:ssh-keygen|pacman:ssh|pacman:ssh-keygen|apk:ssh|apk:ssh-keygen) pkg="openssh" ;;
+      dnf:systemctl|yum:systemctl|zypper:systemctl|pacman:systemctl|apk:systemctl) pkg="systemd" ;;
+    esac
+    if [ -z "${seen[$pkg]+x}" ]; then
+      seen["$pkg"]=1
+      packages+=("$pkg")
+    fi
+  done
+  echo "${packages[*]}"
+}
+
+install_missing_dependencies() {
+  local missing_cmds=("$@")
+  local pkg_manager packages_line
+  local -a packages
+
+  pkg_manager="$(detect_pkg_manager)"
+  if [ -z "$pkg_manager" ]; then
+    ui_err "Could not detect a supported package manager."
+    ui_info "Install these commands manually, then rerun installer: ${missing_cmds[*]}"
+    return 1
+  fi
+
+  packages_line="$(map_cmds_to_packages "$pkg_manager" "${missing_cmds[@]}")"
+  # shellcheck disable=SC2206
+  packages=($packages_line)
+  if [ "${#packages[@]}" -eq 0 ]; then
+    ui_err "Unable to map missing commands to installable packages."
+    ui_info "Missing commands: ${missing_cmds[*]}"
+    return 1
+  fi
+
+  case "$pkg_manager" in
+    apt|dnf|yum|zypper|pacman|apk) ;;
+    *) ui_err "Unsupported package manager: $pkg_manager"; return 1 ;;
+  esac
+
+  ui_warn "Missing dependencies detected: ${missing_cmds[*]}"
+  case "$pkg_manager" in
+    apt) ui_info "Suggested command: apt-get update && apt-get install -y ${packages[*]}" ;;
+    dnf) ui_info "Suggested command: dnf install -y ${packages[*]}" ;;
+    yum) ui_info "Suggested command: yum install -y ${packages[*]}" ;;
+    zypper) ui_info "Suggested command: zypper --non-interactive install ${packages[*]}" ;;
+    pacman) ui_info "Suggested command: pacman -Sy --noconfirm ${packages[*]}" ;;
+    apk) ui_info "Suggested command: apk add --no-cache ${packages[*]}" ;;
+  esac
+
+  if ! prompt_yes_no "Install missing dependencies now?" "y"; then
+    ui_warn "Installer aborted. Install missing dependencies and rerun."
+    return 1
+  fi
+
+  ui_step "Installing missing dependencies with $pkg_manager..."
+  case "$pkg_manager" in
+    apt)
+      apt-get update
+      apt-get install -y "${packages[@]}"
+      ;;
+    dnf) dnf install -y "${packages[@]}" ;;
+    yum) yum install -y "${packages[@]}" ;;
+    zypper) zypper --non-interactive install "${packages[@]}" ;;
+    pacman) pacman -Sy --noconfirm "${packages[@]}" ;;
+    apk) apk add --no-cache "${packages[@]}" ;;
+  esac
+}
+
 resolve_banner_file() {
   local script_dir
   script_dir="$(cd "$(dirname "$0")" && pwd)"
@@ -157,12 +262,14 @@ print_intro() {
 preflight() {
   [ "$(id -u)" -eq 0 ] || die "Run as root."
   local c missing=0
+  local -a missing_cmds=()
   for c in bash curl tar git ssh ssh-keygen; do
     if command -v "$c" >/dev/null 2>&1; then
       ui_ok "dependency: $c"
     else
       ui_err "dependency missing: $c"
       missing=1
+      missing_cmds+=("$c")
     fi
   done
   if [ "${PA_TEST_MODE:-false}" = "true" ]; then
@@ -173,9 +280,15 @@ preflight() {
     else
       ui_err "dependency missing: systemctl"
       missing=1
+      missing_cmds+=("systemctl")
     fi
   fi
-  [ "$missing" -eq 0 ] || die "Install blocked due to missing dependencies."
+  if [ "$missing" -ne 0 ]; then
+    install_missing_dependencies "${missing_cmds[@]}" || die "Install blocked due to missing dependencies."
+    ui_step "Re-running dependency checks..."
+    preflight
+    return 0
+  fi
 }
 
 detect_existing() {

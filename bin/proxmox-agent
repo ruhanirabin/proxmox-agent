@@ -13,44 +13,22 @@ source "$LIB_FILE"
 PA_BIN_TARGET="/usr/local/bin"
 PA_SYSTEMD_TARGET="/etc/systemd/system"
 PA_ENV_TARGET="/root/.pa-agent.env"
+PA_ENV_DRAFT="/root/.pa-agent-install-draft.env"
 PA_ENV_LEGACY="/root/.backup-config.env"
 PA_ENV_EXAMPLE_SOURCE="$REPO_ROOT/env/pa-agent.env.example"
 PA_RUNTIME_VERSION_FILE="$PA_BIN_TARGET/pa-agent-version"
 PA_RUNTIME_VERSION_LEGACY="$PA_BIN_TARGET/proxmox-agent-version"
 PA_BACKUP_DIR_BASE="/root/proxmox-agent-backups"
 PA_UPGRADE_LOG="/var/log/proxmox-agent-upgrade.log"
-PA_CAN_COLOR=0
+pa_ui_init
+C_RESET="${PA_UI_C_RESET}"
+C_BOLD="${PA_UI_C_BOLD}"
+ICON_Q="${PA_UI_ICON_Q}"
 
-if [ -t 1 ]; then
-  PA_CAN_COLOR=1
-fi
-
-if [ "$PA_CAN_COLOR" -eq 1 ]; then
-  C_RESET=$'\033[0m'
-  C_BOLD=$'\033[1m'
-  C_CYAN=$'\033[36m'
-  C_GREEN=$'\033[32m'
-  C_YELLOW=$'\033[33m'
-  C_RED=$'\033[31m'
-else
-  C_RESET=""
-  C_BOLD=""
-  C_CYAN=""
-  C_GREEN=""
-  C_YELLOW=""
-  C_RED=""
-fi
-
-ICON_INFO="[i]"
-ICON_OK="[+]"
-ICON_WARN="[!]"
-ICON_ERR="[x]"
-ICON_Q="[?]"
-
-ui_info() { echo "${C_CYAN}${ICON_INFO}${C_RESET} $*"; }
-ui_ok() { echo "${C_GREEN}${ICON_OK}${C_RESET} $*"; }
-ui_warn() { echo "${C_YELLOW}${ICON_WARN}${C_RESET} $*"; }
-ui_err() { echo "${C_RED}${ICON_ERR}${C_RESET} $*" >&2; }
+ui_info() { pa_ui_info "$*"; }
+ui_ok() { pa_ui_ok "$*"; }
+ui_warn() { pa_ui_warn "$*"; }
+ui_err() { pa_ui_err "$*"; }
 
 is_test_mode() {
   pa_bool_true "${PA_TEST_MODE:-false}"
@@ -172,15 +150,108 @@ prompt_choice() {
   done
 }
 
+detect_pkg_manager() {
+  if command -v apt-get >/dev/null 2>&1; then
+    echo "apt"
+  elif command -v dnf >/dev/null 2>&1; then
+    echo "dnf"
+  elif command -v yum >/dev/null 2>&1; then
+    echo "yum"
+  elif command -v zypper >/dev/null 2>&1; then
+    echo "zypper"
+  elif command -v pacman >/dev/null 2>&1; then
+    echo "pacman"
+  elif command -v apk >/dev/null 2>&1; then
+    echo "apk"
+  else
+    echo ""
+  fi
+}
+
+map_cmds_to_packages() {
+  local pkg_manager="$1"
+  shift
+  local missing_cmds=("$@")
+  local -A seen=()
+  local cmd pkg
+  local packages=()
+  for cmd in "${missing_cmds[@]}"; do
+    pkg="$cmd"
+    case "$pkg_manager:$cmd" in
+      apt:ssh|apt:ssh-keygen) pkg="openssh-client" ;;
+      apt:systemctl) pkg="systemd" ;;
+      dnf:ssh|dnf:ssh-keygen|yum:ssh|yum:ssh-keygen|zypper:ssh|zypper:ssh-keygen|pacman:ssh|pacman:ssh-keygen|apk:ssh|apk:ssh-keygen) pkg="openssh" ;;
+      dnf:systemctl|yum:systemctl|zypper:systemctl|pacman:systemctl|apk:systemctl) pkg="systemd" ;;
+    esac
+    if [ -z "${seen[$pkg]+x}" ]; then
+      seen["$pkg"]=1
+      packages+=("$pkg")
+    fi
+  done
+  echo "${packages[*]}"
+}
+
+install_missing_dependencies() {
+  local missing_cmds=("$@")
+  local pkg_manager packages_line
+  local -a packages
+
+  pkg_manager="$(detect_pkg_manager)"
+  if [ -z "$pkg_manager" ]; then
+    ui_err "Could not detect a supported package manager."
+    ui_info "Install these commands manually, then rerun install: ${missing_cmds[*]}"
+    return 1
+  fi
+
+  packages_line="$(map_cmds_to_packages "$pkg_manager" "${missing_cmds[@]}")"
+  # shellcheck disable=SC2206
+  packages=($packages_line)
+  if [ "${#packages[@]}" -eq 0 ]; then
+    ui_err "Unable to map missing commands to installable packages."
+    ui_info "Missing commands: ${missing_cmds[*]}"
+    return 1
+  fi
+
+  ui_warn "Missing dependencies detected: ${missing_cmds[*]}"
+  case "$pkg_manager" in
+    apt) ui_info "Suggested command: apt-get update && apt-get install -y ${packages[*]}" ;;
+    dnf) ui_info "Suggested command: dnf install -y ${packages[*]}" ;;
+    yum) ui_info "Suggested command: yum install -y ${packages[*]}" ;;
+    zypper) ui_info "Suggested command: zypper --non-interactive install ${packages[*]}" ;;
+    pacman) ui_info "Suggested command: pacman -Sy --noconfirm ${packages[*]}" ;;
+    apk) ui_info "Suggested command: apk add --no-cache ${packages[*]}" ;;
+    *) ui_err "Unsupported package manager: $pkg_manager"; return 1 ;;
+  esac
+
+  if ! prompt_yes_no "Install missing dependencies now?" "y"; then
+    ui_warn "Install aborted. Install missing dependencies and rerun."
+    return 1
+  fi
+
+  case "$pkg_manager" in
+    apt)
+      apt-get update
+      apt-get install -y "${packages[@]}"
+      ;;
+    dnf) dnf install -y "${packages[@]}" ;;
+    yum) yum install -y "${packages[@]}" ;;
+    zypper) zypper --non-interactive install "${packages[@]}" ;;
+    pacman) pacman -Sy --noconfirm "${packages[@]}" ;;
+    apk) apk add --no-cache "${packages[@]}" ;;
+  esac
+}
+
 preflight_checks() {
   local missing=0
   local c
+  local -a missing_cmds=()
   for c in bash git curl ssh ssh-keygen; do
     if command -v "$c" >/dev/null 2>&1; then
       ui_ok "dependency: $c"
     else
       ui_err "dependency missing: $c"
       missing=1
+      missing_cmds+=("$c")
     fi
   done
   if is_test_mode; then
@@ -191,11 +262,13 @@ preflight_checks() {
     else
       ui_err "dependency missing: systemctl"
       missing=1
+      missing_cmds+=("systemctl")
     fi
   fi
   if [ "$missing" -ne 0 ]; then
-    ui_err "Install blocked: missing required dependencies."
-    return 1
+    install_missing_dependencies "${missing_cmds[@]}" || return 1
+    preflight_checks
+    return 0
   fi
 }
 
@@ -219,11 +292,186 @@ EOF
 
 generate_ssh_key_if_missing() {
   if [ ! -f /root/.ssh/id_ed25519 ]; then
+    ui_warn "No SSH key found at /root/.ssh/id_ed25519."
+    if ! prompt_yes_no "Generate a new SSH keypair for GitHub access now?" "y"; then
+      ui_warn "SSH key generation skipped by user."
+      return 1
+    fi
     mkdir -p /root/.ssh
     chmod 700 /root/.ssh
+    ui_info "Generating SSH keypair..."
     ssh-keygen -t ed25519 -C "proxmox-agent" -f /root/.ssh/id_ed25519 -N ""
     chmod 600 /root/.ssh/id_ed25519
     chmod 644 /root/.ssh/id_ed25519.pub
+    ui_ok "Created /root/.ssh/id_ed25519 and /root/.ssh/id_ed25519.pub"
+  fi
+  return 0
+}
+
+is_ssh_remote_url() {
+  local remote_url="${1:-}"
+  [[ "$remote_url" =~ ^git@ ]] || [[ "$remote_url" =~ ^ssh:// ]]
+}
+
+is_https_remote_url() {
+  local remote_url="${1:-}"
+  [[ "$remote_url" =~ ^https:// ]]
+}
+
+is_supported_remote_url() {
+  local remote_url="${1:-}"
+  is_ssh_remote_url "$remote_url" || is_https_remote_url "$remote_url"
+}
+
+mask_secret_value() {
+  local v="${1:-}"
+  if [ -z "$v" ]; then
+    echo "unset"
+  else
+    echo "set (${#v} chars)"
+  fi
+}
+
+save_install_draft() {
+  local repo_dir="$1"
+  local repo_branch="$2"
+  local remote_url="$3"
+  local retention_days="$4"
+  local notify_mode="$5"
+  local bot_token="$6"
+  local chat_id="$7"
+  local webhook_url="$8"
+  local webhook_token="$9"
+
+  cat > "$PA_ENV_DRAFT" <<EOF
+DRAFT_REPO_DIR=$(printf "%q" "$repo_dir")
+DRAFT_REPO_BRANCH=$(printf "%q" "$repo_branch")
+DRAFT_GIT_REMOTE_URL=$(printf "%q" "$remote_url")
+DRAFT_PA_LOG_RETENTION_DAYS=$(printf "%q" "$retention_days")
+DRAFT_NOTIFY_MODE=$(printf "%q" "$notify_mode")
+DRAFT_BOT_TOKEN=$(printf "%q" "$bot_token")
+DRAFT_CHAT_ID=$(printf "%q" "$chat_id")
+DRAFT_WEBHOOK_URL=$(printf "%q" "$webhook_url")
+DRAFT_WEBHOOK_BEARER_TOKEN=$(printf "%q" "$webhook_token")
+EOF
+  chmod 600 "$PA_ENV_DRAFT"
+}
+
+load_install_draft() {
+  if [ -f "$PA_ENV_DRAFT" ]; then
+    # shellcheck disable=SC1090
+    source "$PA_ENV_DRAFT"
+    return 0
+  fi
+  return 1
+}
+
+clear_install_draft() {
+  rm -f "$PA_ENV_DRAFT"
+}
+
+validate_guided_inputs() {
+  local repo_dir="$1"
+  local repo_branch="$2"
+  local remote_url="$3"
+  local notify_mode="$4"
+  local bot_token="$5"
+  local chat_id="$6"
+  local webhook_url="$7"
+
+  local failed=0
+  echo
+  echo "${C_BOLD}Final Validation Checklist${C_RESET}"
+
+  if [ -n "$repo_dir" ]; then ui_ok "repo_dir configured ($repo_dir)"; else ui_err "repo_dir is required"; failed=1; fi
+  if [ -n "$repo_branch" ]; then ui_ok "repo_branch configured ($repo_branch)"; else ui_err "repo_branch is required"; failed=1; fi
+  if is_supported_remote_url "$remote_url"; then
+    if is_ssh_remote_url "$remote_url"; then
+      ui_ok "git_remote_url format valid (SSH)"
+    else
+      ui_ok "git_remote_url format valid (HTTPS)"
+    fi
+  else
+    ui_err "git_remote_url must be SSH or HTTPS"
+    failed=1
+  fi
+
+  case "$notify_mode" in
+    telegram|webhook|both) ui_ok "notification mode selected: $notify_mode" ;;
+    *) ui_err "notification mode must be telegram, webhook, or both"; failed=1 ;;
+  esac
+
+  if [ "$notify_mode" = "telegram" ] || [ "$notify_mode" = "both" ]; then
+    if [ -n "$bot_token" ] && [ -n "$chat_id" ]; then
+      ui_ok "telegram configuration complete"
+    else
+      ui_err "telegram mode requires BOT_TOKEN and CHAT_ID"
+      failed=1
+    fi
+  fi
+
+  if [ "$notify_mode" = "webhook" ] || [ "$notify_mode" = "both" ]; then
+    if [[ -n "$webhook_url" && "$webhook_url" =~ ^https?:// ]]; then
+      ui_ok "webhook configuration complete"
+    else
+      ui_err "webhook mode requires a valid WEBHOOK_URL"
+      failed=1
+    fi
+  fi
+
+  if [ "$failed" -eq 0 ]; then
+    ui_ok "All validation checks passed."
+    return 0
+  fi
+  ui_err "Validation failed. Please correct the inputs."
+  return 1
+}
+
+print_guided_input_summary() {
+  local repo_dir="$1"
+  local repo_branch="$2"
+  local remote_url="$3"
+  local retention_days="$4"
+  local notify_mode="$5"
+  local bot_token="$6"
+  local chat_id="$7"
+  local webhook_url="$8"
+  local webhook_token="$9"
+  local remote_mode="HTTPS"
+  is_ssh_remote_url "$remote_url" && remote_mode="SSH"
+
+  echo
+  echo "${C_BOLD}Settings Summary${C_RESET}"
+  echo "  - REPO_DIR: $repo_dir"
+  echo "  - REPO_BRANCH: $repo_branch"
+  echo "  - GIT_REMOTE_URL: $remote_url"
+  echo "  - Remote auth mode: $remote_mode"
+  echo "  - PA_LOG_RETENTION_DAYS: $retention_days"
+  echo "  - Notification mode: $notify_mode"
+  if [ "$notify_mode" = "telegram" ] || [ "$notify_mode" = "both" ]; then
+    echo "  - BOT_TOKEN: $(mask_secret_value "$bot_token")"
+    echo "  - CHAT_ID: $chat_id"
+  fi
+  if [ "$notify_mode" = "webhook" ] || [ "$notify_mode" = "both" ]; then
+    echo "  - WEBHOOK_URL: $webhook_url"
+    echo "  - WEBHOOK_BEARER_TOKEN: $(mask_secret_value "$webhook_token")"
+  fi
+}
+
+print_repo_url_guidance() {
+  echo "  - Create an empty GitHub repository first (or use an existing one)."
+  echo "  - Then provide one of these remote URL formats:"
+  echo "    * SSH:   git@github.com:OWNER/REPO.git"
+  echo "    * HTTPS: https://github.com/OWNER/REPO.git"
+}
+
+show_public_key_for_github() {
+  if [ -f /root/.ssh/id_ed25519.pub ]; then
+    ui_info "Copy this OpenSSH public key to GitHub -> Settings -> SSH and GPG keys:"
+    echo "----- BEGIN OPENSSH PUBLIC KEY -----"
+    cat /root/.ssh/id_ed25519.pub
+    echo "----- END OPENSSH PUBLIC KEY -----"
+    echo
   fi
 }
 
@@ -239,59 +487,141 @@ validate_github_ssh() {
 }
 
 guided_env_setup() {
+  local force_resume="${1:-0}"
   [ -f "$PA_ENV_TARGET" ] || install -m 600 "$PA_ENV_EXAMPLE_SOURCE" "$PA_ENV_TARGET"
   pa_load_env
 
-  ui_info "Configure backup repository settings."
   local repo_dir repo_branch remote_url retention_days
-  repo_dir="$(prompt_value "Backup local repo directory" "${REPO_DIR:-/root/pve-config}")"
-  repo_branch="$(prompt_value "Backup git branch" "${REPO_BRANCH:-main}")"
-  remote_url="$(prompt_value "Git remote URL (ssh)" "${GIT_REMOTE_URL:-}")"
-  while [ -z "$remote_url" ]; do
-    ui_warn "Git remote URL is required for automated backup pushes."
-    remote_url="$(prompt_value "Git remote URL (ssh)" "")"
-  done
-  retention_days="$(prompt_value "Log retention days" "${PA_LOG_RETENTION_DAYS:-14}")"
-
-  set_env_kv "$PA_ENV_TARGET" "REPO_DIR" "$repo_dir"
-  set_env_kv "$PA_ENV_TARGET" "REPO_BRANCH" "$repo_branch"
-  set_env_kv "$PA_ENV_TARGET" "GIT_REMOTE_URL" "$remote_url"
-  set_env_kv "$PA_ENV_TARGET" "PA_LOG_RETENTION_DAYS" "$retention_days"
-
-  ui_info "Configure notifications."
   local notify_mode bot_token chat_id webhook_enabled webhook_url webhook_token
-  notify_mode="$(prompt_choice "Notification mode" "none" "none" "telegram" "webhook" "both")"
 
+  repo_dir="${REPO_DIR:-/root/pve-config}"
+  repo_branch="${REPO_BRANCH:-main}"
+  remote_url="${GIT_REMOTE_URL:-}"
+  retention_days="${PA_LOG_RETENTION_DAYS:-14}"
+  notify_mode="telegram"
   bot_token="${BOT_TOKEN:-}"
   chat_id="${CHAT_ID:-}"
   webhook_enabled="false"
   webhook_url="${WEBHOOK_URL:-}"
   webhook_token="${WEBHOOK_BEARER_TOKEN:-}"
 
+  if [ -f "$PA_ENV_DRAFT" ]; then
+    ui_info "Saved installer settings found: $PA_ENV_DRAFT"
+    if [ "$force_resume" -eq 1 ]; then
+      if load_install_draft; then
+        repo_dir="${DRAFT_REPO_DIR:-$repo_dir}"
+        repo_branch="${DRAFT_REPO_BRANCH:-$repo_branch}"
+        remote_url="${DRAFT_GIT_REMOTE_URL:-$remote_url}"
+        retention_days="${DRAFT_PA_LOG_RETENTION_DAYS:-$retention_days}"
+        notify_mode="${DRAFT_NOTIFY_MODE:-$notify_mode}"
+        bot_token="${DRAFT_BOT_TOKEN:-$bot_token}"
+        chat_id="${DRAFT_CHAT_ID:-$chat_id}"
+        webhook_url="${DRAFT_WEBHOOK_URL:-$webhook_url}"
+        webhook_token="${DRAFT_WEBHOOK_BEARER_TOKEN:-$webhook_token}"
+        ui_ok "Loaded saved settings (resume mode)."
+        print_guided_input_summary "$repo_dir" "$repo_branch" "$remote_url" "$retention_days" "$notify_mode" "$bot_token" "$chat_id" "$webhook_url" "$webhook_token"
+        ui_info "Reconfirm and edit any values in the next prompts."
+      else
+        ui_warn "Could not load saved installer settings file."
+      fi
+    elif prompt_yes_no "Load saved settings and continue?" "y"; then
+      if load_install_draft; then
+        repo_dir="${DRAFT_REPO_DIR:-$repo_dir}"
+        repo_branch="${DRAFT_REPO_BRANCH:-$repo_branch}"
+        remote_url="${DRAFT_GIT_REMOTE_URL:-$remote_url}"
+        retention_days="${DRAFT_PA_LOG_RETENTION_DAYS:-$retention_days}"
+        notify_mode="${DRAFT_NOTIFY_MODE:-$notify_mode}"
+        bot_token="${DRAFT_BOT_TOKEN:-$bot_token}"
+        chat_id="${DRAFT_CHAT_ID:-$chat_id}"
+        webhook_url="${DRAFT_WEBHOOK_URL:-$webhook_url}"
+        webhook_token="${DRAFT_WEBHOOK_BEARER_TOKEN:-$webhook_token}"
+        ui_ok "Loaded saved settings."
+        print_guided_input_summary "$repo_dir" "$repo_branch" "$remote_url" "$retention_days" "$notify_mode" "$bot_token" "$chat_id" "$webhook_url" "$webhook_token"
+        ui_info "Reconfirm and edit any values in the next prompts."
+      else
+        ui_warn "Could not load saved installer settings file."
+      fi
+    fi
+  fi
+
+  ui_info "Configure backup repository settings."
+  ui_info "GitHub setup guidance:"
+  print_repo_url_guidance
+  repo_dir="$(prompt_value "Backup local repo directory" "$repo_dir")"
+  repo_branch="$(prompt_value "Backup git branch" "$repo_branch")"
+  remote_url="$(prompt_value "Git remote URL (SSH or HTTPS)" "$remote_url")"
+  while ! is_supported_remote_url "$remote_url"; do
+    if [ -z "$remote_url" ]; then
+      ui_warn "Git remote URL is required for automated backup pushes."
+    else
+      ui_warn "Remote URL must be SSH (git@... or ssh://...) or HTTPS (https://...)."
+    fi
+    print_repo_url_guidance
+    remote_url="$(prompt_value "Git remote URL (SSH or HTTPS)" "")"
+  done
+  retention_days="$(prompt_value "Log retention days" "$retention_days")"
+
+  ui_info "Configure notifications."
+  ui_info "Choose at least one notification channel: telegram, webhook, or both."
+  case "$notify_mode" in
+    telegram|webhook|both) ;;
+    *) notify_mode="telegram" ;;
+  esac
+  notify_mode="$(prompt_choice "Notification mode" "$notify_mode" "telegram" "webhook" "both")"
+
   if [ "$notify_mode" = "telegram" ] || [ "$notify_mode" = "both" ]; then
     bot_token="$(prompt_value "Telegram BOT_TOKEN" "$bot_token")"
-    chat_id="$(prompt_value "Telegram CHAT_ID" "$chat_id")"
+    chat_id="$(prompt_value "Telegram CHAT_ID (Telegram ID)" "$chat_id")"
     while [ -z "$bot_token" ] || [ -z "$chat_id" ]; do
-      ui_warn "BOT_TOKEN and CHAT_ID are required for Telegram mode."
+      ui_warn "BOT_TOKEN and CHAT_ID are required when Telegram is enabled."
       bot_token="$(prompt_value "Telegram BOT_TOKEN" "$bot_token")"
-      chat_id="$(prompt_value "Telegram CHAT_ID" "$chat_id")"
+      chat_id="$(prompt_value "Telegram CHAT_ID (Telegram ID)" "$chat_id")"
     done
+  else
+    bot_token=""
+    chat_id=""
   fi
 
   if [ "$notify_mode" = "webhook" ] || [ "$notify_mode" = "both" ]; then
     webhook_enabled="true"
     webhook_url="$(prompt_value "Webhook URL (https://...)" "$webhook_url")"
     while [[ -z "$webhook_url" || ! "$webhook_url" =~ ^https?:// ]]; do
-      ui_warn "A valid webhook URL is required for webhook mode."
+      ui_warn "A valid webhook URL is required when webhook is enabled."
       webhook_url="$(prompt_value "Webhook URL (https://...)" "$webhook_url")"
     done
     webhook_token="$(prompt_value "Webhook bearer token (optional)" "$webhook_token")"
-  fi
-
-  if [ "$notify_mode" = "none" ] || [ "$notify_mode" = "telegram" ]; then
+  else
     webhook_enabled="false"
+    webhook_url=""
+    webhook_token=""
   fi
 
+  print_guided_input_summary "$repo_dir" "$repo_branch" "$remote_url" "$retention_days" "$notify_mode" "$bot_token" "$chat_id" "$webhook_url" "$webhook_token"
+  if ! validate_guided_inputs "$repo_dir" "$repo_branch" "$remote_url" "$notify_mode" "$bot_token" "$chat_id" "$webhook_url"; then
+    return 1
+  fi
+
+  local final_action
+  final_action="$(prompt_choice "Final action" "install" "install" "save" "exit")"
+  case "$final_action" in
+    save)
+      save_install_draft "$repo_dir" "$repo_branch" "$remote_url" "$retention_days" "$notify_mode" "$bot_token" "$chat_id" "$webhook_url" "$webhook_token"
+      ui_ok "Settings saved to $PA_ENV_DRAFT"
+      ui_info "Resume with: proxmox-agent install --resume"
+      return 2
+      ;;
+    exit)
+      ui_warn "Install cancelled before applying environment settings."
+      return 2
+      ;;
+    install)
+      ;;
+  esac
+
+  set_env_kv "$PA_ENV_TARGET" "REPO_DIR" "$repo_dir"
+  set_env_kv "$PA_ENV_TARGET" "REPO_BRANCH" "$repo_branch"
+  set_env_kv "$PA_ENV_TARGET" "GIT_REMOTE_URL" "$remote_url"
+  set_env_kv "$PA_ENV_TARGET" "PA_LOG_RETENTION_DAYS" "$retention_days"
   set_env_kv "$PA_ENV_TARGET" "BOT_TOKEN" "$bot_token"
   set_env_kv "$PA_ENV_TARGET" "CHAT_ID" "$chat_id"
   set_env_kv "$PA_ENV_TARGET" "WEBHOOK_ENABLED" "$webhook_enabled"
@@ -299,13 +629,23 @@ guided_env_setup() {
   set_env_kv "$PA_ENV_TARGET" "WEBHOOK_BEARER_TOKEN" "$webhook_token"
 
   chmod 600 "$PA_ENV_TARGET"
+  clear_install_draft
   pa_load_env
 }
 
 guided_github_auth() {
+  local remote_url="${1:-}"
+  if ! is_ssh_remote_url "$remote_url"; then
+    ui_info "HTTPS remote detected; skipping SSH key setup/validation."
+    return 0
+  fi
+
   if is_test_mode; then
     ui_warn "PA_TEST_MODE=true -> skipping interactive GitHub SSH validation."
     return 0
+  fi
+  if ! generate_ssh_key_if_missing; then
+    return 1
   fi
   ui_info "Checking GitHub SSH authentication."
   while true; do
@@ -315,9 +655,7 @@ guided_github_auth() {
     fi
 
     ui_warn "GitHub SSH authentication failed."
-    ui_info "Public key to add in GitHub (https://github.com/settings/keys):"
-    cat /root/.ssh/id_ed25519.pub
-    echo
+    show_public_key_for_github
     if prompt_yes_no "Open GitHub, add the key, and retry SSH validation now?" "y"; then
       continue
     fi
@@ -408,7 +746,7 @@ collect_preinstall_report_data() {
 
   if is_test_mode; then
     PRE_NOTES+=("PA_TEST_MODE=true; GitHub SSH and systemctl enforcement are relaxed for test runs")
-  elif ! validate_github_ssh; then
+  elif is_ssh_remote_url "${GIT_REMOTE_URL:-}" && ! validate_github_ssh; then
     PRE_WARNINGS+=("GitHub SSH auth is not currently valid; installer will guide key setup/retry")
   fi
 
@@ -855,9 +1193,43 @@ doctor_emit_json() {
 }
 
 cmd_install() {
+  local force_resume=0
+  local clear_draft=0
+
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --resume) force_resume=1 ;;
+      --clear-draft) clear_draft=1 ;;
+      *) ui_err "Unknown option for install: $1"; exit 1 ;;
+    esac
+    shift
+  done
+
   require_root
+
+  if [ "$clear_draft" -eq 1 ]; then
+    if [ -f "$PA_ENV_DRAFT" ]; then
+      clear_install_draft
+      ui_ok "Cleared saved installer draft: $PA_ENV_DRAFT"
+    else
+      ui_info "No saved installer draft found at $PA_ENV_DRAFT"
+    fi
+    if [ "$force_resume" -eq 0 ]; then
+      exit 0
+    fi
+  fi
+
+  if [ "$force_resume" -eq 1 ] && [ ! -f "$PA_ENV_DRAFT" ]; then
+    ui_err "Resume requested but no saved draft was found at $PA_ENV_DRAFT"
+    ui_info "Run proxmox-agent install and choose Final action: save first."
+    exit 1
+  fi
+
   echo "${C_BOLD}Proxmox Agent installer${C_RESET}"
   ui_info "Starting guided installation..."
+  if [ "$force_resume" -eq 1 ]; then
+    ui_info "Resume mode enabled: saved settings will be loaded."
+  fi
 
   preflight_checks || exit 1
   if ! prompt_yes_no "Proceed with installation changes on this node?" "n"; then
@@ -893,9 +1265,18 @@ cmd_install() {
   if [ "$rc" -eq 0 ]; then
     migrate_env_file
     write_runtime_version "$(get_repo_version)"
-    generate_ssh_key_if_missing
-    guided_env_setup
-    [ "$rc" -eq 0 ] && guided_github_auth || rc=1
+    if [ "$rc" -eq 0 ]; then
+      guided_env_setup "$force_resume"
+      rc=$?
+      if [ "$rc" -eq 2 ]; then
+        restore_from_backup "$backup_dir"
+        ui_warn "Install paused. Resume later with: proxmox-agent install --resume"
+        exit 0
+      elif [ "$rc" -ne 0 ]; then
+        rc=1
+      fi
+    fi
+    [ "$rc" -eq 0 ] && guided_github_auth "${GIT_REMOTE_URL:-}" || rc=1
     [ "$rc" -eq 0 ] && configure_repo_remote_if_needed
     [ "$rc" -eq 0 ] && validate_git_remote_access || rc=1
     [ "$rc" -eq 0 ] && disable_legacy_units
@@ -1163,7 +1544,10 @@ usage() {
 Usage: proxmox-agent <command> [options]
 
 Commands:
-  install                 Install scripts, units, version file, and validate setup
+  install [--resume|--clear-draft]
+                          Install scripts, units, version file, and validate setup
+                          --resume: load saved draft settings and continue guided install
+                          --clear-draft: remove saved draft settings file and exit
   doctor [--json]         Run health checks
   preinstall-report [--json]
                           Read-only simulation report of current state vs planned install changes

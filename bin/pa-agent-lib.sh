@@ -27,6 +27,54 @@ pa_json_escape() {
   printf '%s' "$s"
 }
 
+pa_ui_init() {
+  PA_UI_C_RESET=""
+  PA_UI_C_BOLD=""
+  PA_UI_C_CYAN=""
+  PA_UI_C_GREEN=""
+  PA_UI_C_YELLOW=""
+  PA_UI_C_RED=""
+  PA_UI_C_BLUE=""
+
+  PA_UI_ICON_INFO="[i]"
+  PA_UI_ICON_OK="[+]"
+  PA_UI_ICON_WARN="[!]"
+  PA_UI_ICON_ERR="[x]"
+  PA_UI_ICON_STEP="[>]"
+  PA_UI_ICON_Q="[?]"
+
+  local can_color=0
+  if [ -t 1 ] && [ "${NO_COLOR:-}" = "" ] && [ "${TERM:-}" != "dumb" ]; then
+    can_color=1
+  fi
+
+  if [ "$can_color" -eq 1 ]; then
+    PA_UI_C_RESET=$'\033[0m'
+    PA_UI_C_BOLD=$'\033[1m'
+    PA_UI_C_CYAN=$'\033[36m'
+    PA_UI_C_GREEN=$'\033[32m'
+    PA_UI_C_YELLOW=$'\033[33m'
+    PA_UI_C_RED=$'\033[31m'
+    PA_UI_C_BLUE=$'\033[34m'
+  fi
+
+  if [ -t 1 ] && [ "${PA_UI_ASCII:-}" != "1" ] && locale charmap 2>/dev/null | grep -qi "utf-8"; then
+    PA_UI_ICON_INFO="ℹ"
+    PA_UI_ICON_OK="✔"
+    PA_UI_ICON_WARN="⚠"
+    PA_UI_ICON_ERR="✖"
+    PA_UI_ICON_STEP="➤"
+    PA_UI_ICON_Q="❯"
+  fi
+}
+
+pa_ui_info() { echo "${PA_UI_C_CYAN}${PA_UI_ICON_INFO}${PA_UI_C_RESET} $*"; }
+pa_ui_ok() { echo "${PA_UI_C_GREEN}${PA_UI_ICON_OK}${PA_UI_C_RESET} $*"; }
+pa_ui_warn() { echo "${PA_UI_C_YELLOW}${PA_UI_ICON_WARN}${PA_UI_C_RESET} $*"; }
+pa_ui_err() { echo "${PA_UI_C_RED}${PA_UI_ICON_ERR}${PA_UI_C_RESET} $*" >&2; }
+pa_ui_step() { echo "${PA_UI_C_BLUE}${PA_UI_ICON_STEP}${PA_UI_C_RESET} $*"; }
+pa_ui_title() { echo "${PA_UI_C_BOLD}$*${PA_UI_C_RESET}"; }
+
 pa_load_version() {
   AGENT_VERSION="unknown"
   if [ -f "$PA_VERSION_FILE" ]; then

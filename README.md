@@ -19,7 +19,7 @@ It is designed for operators who want a practical change-history trail for node 
 - Single runtime version source: `/usr/local/bin/pa-agent-version` generated from repo `VERSION`.
 - Guided installer flow (`install.sh`) with preflight checks and confirmation gate.
 - Lifecycle CLI:
-  - `proxmox-agent install`
+  - `proxmox-agent install [--resume|--clear-draft]`
   - `proxmox-agent doctor [--json]`
   - `proxmox-agent preinstall-report [--json]` (alias: `pa-doctor`)
   - `proxmox-agent backup`
@@ -66,11 +66,39 @@ sudo ./bin/proxmox-agent install
 - Branch (`REPO_BRANCH`)
 - Git remote URL (`GIT_REMOTE_URL`)
 - Log retention days (`PA_LOG_RETENTION_DAYS`)
-- Notification mode (`none`, `telegram`, `webhook`, `both`)
+- Notification mode (`telegram`, `webhook`, `both`) - at least one is required
 - Telegram values (`BOT_TOKEN`, `CHAT_ID`) if selected
 - Webhook URL/token if selected
 
+At final confirmation, you can choose:
+
+- `install` (apply and continue)
+- `save` (save draft and continue later)
+- `exit` (abort without applying)
+
+Draft settings are saved at `/root/.pa-agent-install-draft.env`.
+
+Use explicit draft controls:
+
+```bash
+proxmox-agent install --resume
+proxmox-agent install --clear-draft
+```
+
 It also validates GitHub SSH auth and helps users retry after adding public keys.
+SSH auth checks are enforced only when `GIT_REMOTE_URL` is SSH; HTTPS remotes are allowed and skip SSH validation.
+
+## Console UI
+
+Installer and CLI status messages use a shared color/icon system with automatic fallback.
+
+- UTF-8 terminal: icon cues (for example `ℹ`, `✔`, `⚠`, `✖`)
+- Non-UTF-8 terminal: ASCII cues (`[i]`, `[+]`, `[!]`, `[x]`)
+
+Controls:
+
+- `NO_COLOR=1` disables ANSI colors
+- `PA_UI_ASCII=1` forces ASCII icons
 
 ## Preflight simulation (`pa-doctor`)
 

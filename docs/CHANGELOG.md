@@ -1,3 +1,11 @@
+## 0.7.10
+
+- feat: add resumable guided install drafts with explicit `install --resume` and `install --clear-draft` controls.
+- improve: enforce final guided-install validation checklist with install/save/exit confirmation before applying settings.
+- improve: allow HTTPS or SSH repository remotes while enforcing GitHub SSH checks only for SSH remotes.
+- improve: add dependency auto-install prompts with package-manager-specific commands in bootstrap and CLI installers.
+- improve: standardize CLI visual cues through shared color/icon UI with UTF-8 and ASCII fallback controls.
+
 ## 0.7.9
 
 - fix: prevent duplicate boot notifications across service retries by using per-boot dedupe locks.

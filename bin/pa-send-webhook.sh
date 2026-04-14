@@ -6,6 +6,7 @@ LIB_FILE="${LIB_FILE:-/usr/local/bin/pa-agent-lib.sh}"
 [ -f "$LIB_FILE" ] || LIB_FILE="$(cd "$(dirname "$0")" && pwd)/pa-agent-lib.sh"
 # shellcheck disable=SC1090
 source "$LIB_FILE"
+pa_ui_init
 
 pa_load_version
 pa_load_env
@@ -16,12 +17,14 @@ SUMMARY="${3:-}"
 DETAILS="${4:-}"
 
 if [ -z "$EVENT" ]; then
-  echo "Usage: pa-send-webhook.sh <event> [status] [summary] [details]"
+  pa_ui_err "Usage: pa-send-webhook.sh <event> [status] [summary] [details]"
   exit 1
 fi
 
 if pa_send_webhook "$EVENT" "${STATUS:-info}" "$SUMMARY" "$DETAILS"; then
+  pa_ui_ok "Webhook sent for event: $EVENT"
   exit 0
 fi
 
+pa_ui_err "Webhook send failed for event: $EVENT"
 exit 1
