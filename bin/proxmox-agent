@@ -111,11 +111,13 @@ set_env_kv() {
   local file="$1"
   local key="$2"
   local value="$3"
+  local escaped
+  escaped="$(printf '%q' "$value")"
   touch "$file"
   if grep -qE "^${key}=" "$file"; then
-    sed -i "s#^${key}=.*#${key}=${value}#g" "$file"
+    sed -i "s#^${key}=.*#${key}=${escaped}#g" "$file"
   else
-    printf '\n%s=%s\n' "$key" "$value" >> "$file"
+    printf '\n%s=%s\n' "$key" "$escaped" >> "$file"
   fi
 }
 

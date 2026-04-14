@@ -107,7 +107,13 @@ pa_load_env() {
 
   if [ -f "$ENV_FILE" ]; then
     # shellcheck disable=SC1090
+    set +e
     source "$ENV_FILE"
+    local source_rc=$?
+    set -e
+    if [ "$source_rc" -ne 0 ]; then
+      echo "[!] Warning: failed to fully parse $ENV_FILE (rc=$source_rc). Continue with loaded values and fix invalid lines." >&2
+    fi
   fi
 }
 

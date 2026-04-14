@@ -1,3 +1,8 @@
+## 0.7.20
+
+- fix: shell-escape env values when writing installer settings so commit author names with spaces are saved safely.
+- fix: make env loading tolerant of malformed lines and emit a warning instead of aborting installer flow.
+
 ## 0.7.19
 
 - feat: prompt for Git commit author full name and email during guided install and require valid identity before apply.
