@@ -24,6 +24,7 @@ It is designed for operators who want a practical change-history trail for node 
   - `proxmox-agent preinstall-report [--json]` (alias: `pa-doctor`)
   - `proxmox-agent backup`
   - `proxmox-agent notify [message]`
+  - `proxmox-agent uninstall`
   - `proxmox-agent upgrade [--channel stable|edge] [--target <tag>]`
 - Automatic backup/rollback safety during install and upgrade.
 
@@ -80,11 +81,18 @@ At final confirmation, you can choose:
 
 Draft settings are saved at `/root/.pa-agent-install-draft.env`.
 
+If an existing install is detected, installer shows an early action menu:
+
+- `Reinstall`
+- `Uninstall`
+- `Exit without making changes`
+
 Use explicit draft controls:
 
 ```bash
 proxmox-agent install --resume
 proxmox-agent install --clear-draft
+proxmox-agent uninstall
 ```
 
 It also validates GitHub SSH auth and helps users retry after adding public keys.

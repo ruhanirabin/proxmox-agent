@@ -1,3 +1,9 @@
+## 0.7.24
+
+- feat: add early installed-state action menu in `proxmox-agent install` with `Reinstall`, `Uninstall`, or `Exit without making changes`.
+- feat: add `proxmox-agent uninstall` command to remove managed scripts, units, runtime version file, env files, and saved install draft.
+- improve: keep reinstall path interactive for refactoring env variables while exposing a clear no-change exit path.
+
 ## 0.7.23
 
 - fix: rewrite env key updates using safe full-line replacement so values with spaces (for example `GIT_COMMIT_NAME`) are persisted correctly.

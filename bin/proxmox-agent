@@ -244,6 +244,24 @@ prompt_final_action() {
   done
 }
 
+prompt_existing_install_action() {
+  local answer normalized
+  while true; do
+    echo "${ICON_Q} Existing installation detected. Choose action:" >&2
+    echo "  1. Reinstall" >&2
+    echo "  2. Uninstall" >&2
+    echo "  3. Exit without making changes" >&2
+    read -r -p "${ICON_Q} Choose [1-3] [1]: " answer
+    normalized="$(echo "${answer:-1}" | tr '[:upper:]' '[:lower:]')"
+    case "$normalized" in
+      1|reinstall) echo "reinstall"; return 0 ;;
+      2|uninstall) echo "uninstall"; return 0 ;;
+      3|exit) echo "exit"; return 0 ;;
+      *) ui_warn "Invalid choice: ${answer:-1}" ;;
+    esac
+  done
+}
+
 detect_pkg_manager() {
   if command -v apt-get >/dev/null 2>&1; then
     echo "apt"
@@ -1300,6 +1318,31 @@ remove_legacy_artifacts() {
   rm -f "$PA_ENV_LEGACY" "$PA_RUNTIME_VERSION_LEGACY"
 }
 
+perform_uninstall() {
+  require_root
+  local ts backup_dir
+  ts="$(date +%Y%m%d-%H%M%S)"
+  backup_dir="$PA_BACKUP_DIR_BASE/uninstall-$ts"
+  mkdir -p "$PA_BACKUP_DIR_BASE"
+  backup_current_install "$backup_dir"
+
+  ui_warn "Uninstall will remove managed scripts, units, runtime version file, and env files."
+  if ! prompt_yes_no "Proceed with uninstall?" "n"; then
+    ui_warn "Uninstall cancelled by user."
+    return 2
+  fi
+
+  disable_all_managed_units
+  cleanup_managed_artifacts
+  remove_legacy_artifacts
+  clear_install_draft
+  pa_systemctl daemon-reload
+
+  ui_ok "Uninstall complete."
+  ui_info "Backup snapshot saved at: $backup_dir"
+  return 0
+}
+
 install_canonical_files_from_repo() {
   local f
   local bin_files=(
@@ -1496,7 +1539,24 @@ cmd_install() {
   pa_load_version
   if [ "${AGENT_VERSION:-unknown}" != "unknown" ]; then
     ui_warn "Detected existing installation version: v$AGENT_VERSION"
-    if ! prompt_yes_no "Proceed with reinstall/upgrade on this node?" "y"; then
+    local existing_action
+    existing_action="$(prompt_existing_install_action)"
+    case "$existing_action" in
+      uninstall)
+        perform_uninstall
+        local uninstall_rc=$?
+        [ "$uninstall_rc" -eq 2 ] && exit 0
+        [ "$uninstall_rc" -eq 0 ] && exit 0
+        exit 1
+        ;;
+      exit)
+        ui_warn "Install cancelled by user."
+        exit 0
+        ;;
+      reinstall)
+        ;;
+    esac
+    if ! prompt_yes_no "Proceed with reinstall on this node?" "y"; then
       ui_warn "Install cancelled by user."
       exit 0
     fi
@@ -1820,6 +1880,7 @@ Commands:
                           Read-only simulation report of current state vs planned install changes
   backup                  Run backup script manually
   notify [message]        Send Telegram test message
+  uninstall               Remove managed agent scripts, units, version file, and env files
   upgrade [--channel stable|edge] [--target <tag>]
 EOF
 }
@@ -1834,6 +1895,7 @@ main() {
     preinstall-report|pa-doctor) cmd_preinstall_report "$@" ;;
     backup) cmd_backup "$@" ;;
     notify) cmd_notify "$@" ;;
+    uninstall) perform_uninstall "$@" ;;
     upgrade) cmd_upgrade "$@" ;;
     ""|-h|--help|help) usage ;;
     *)
