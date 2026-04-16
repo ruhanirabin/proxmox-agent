@@ -232,7 +232,30 @@ PA_TEST_MODE=true ./bin/proxmox-agent preinstall-report
 PA_TEST_MODE=true ./bin/proxmox-agent doctor
 ```
 
-Smoke test helper:
+### Automated Test Suite
+
+For comprehensive testing with Docker:
+
+```bash
+cd tests
+./run-tests.sh              # Ubuntu mode (default, Windows compatible)
+./run-tests.sh --pve-mode   # Real PVE container (Linux only)
+```
+
+**What it tests**: Doctor/preinstall-report, installation flow, backup script execution, 
+and shutdown script hardening (flock, shutdown-state detection).
+
+**Windows Compatibility**: The PVE container (`ghcr.io/longqt-sea/proxmox-ve`) requires Linux 
+cgroups and does NOT work on Windows Docker. Use the default Ubuntu mode for Windows, which 
+tests script syntax, structure, and hardening without requiring real PVE.
+
+For full PVE testing on Windows, consider WSL2, a Linux VM, or CI environments.
+
+See [`tests/README.md`](tests/README.md) for detailed usage and platform-specific guidance.
+
+### Quick smoke test (Ubuntu)
+
+For a lightweight installer flow check on generic Ubuntu:
 
 ```bash
 tests/docker-guided-smoke.sh

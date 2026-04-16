@@ -1,0 +1,116 @@
+version: '3.8'
+
+# Proxmox Agent Test Environment
+# Supports two modes:
+#   - PVE mode: Uses real Proxmox VE container (Linux only, requires cgroups)
+#   - Ubuntu mode: Uses Ubuntu 22.04 for Windows compatibility (PA_TEST_MODE=true)
+#
+# Mode selection is controlled by PA_TEST_MODE environment variable or --pve-mode flag in run-tests.sh
+
+services:
+  # PVE mode: Real Proxmox VE container (Linux only)
+  pve-test:
+    image: ${PA_TEST_IMAGE:-ghcr.io/longqt-sea/proxmox-ve}
+    container_name: pa-test-pve
+    hostname: pve-test
+    stdin_open: true
+    tty: true
+    # Don't restart on failure - we want clean test runs
+    restart: "no"
+    ports:
+      - "2222:22"       # SSH access for debugging
+      - "8006:8006"     # Proxmox Web UI (optional)
+    environment:
+      - PASSWORD=testpass123
+      # Enable test mode for automated runs
+      - PA_TEST_MODE=true
+    volumes:
+      # Mount the agent code for testing
+      - ../:/proxmox-agent:ro
+      # Test volumes
+      - pa-test-logs:/var/log
+      - pa-test-data:/root
+    privileged: true
+    cap_add:
+      - ALL
+    security_opt:
+      - seccomp:unconfined
+      - apparmor:unconfined
+    # Health check to ensure PVE is ready
+    healthcheck:
+      test: ["CMD", "systemctl", "is-active", "pveproxy"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+    # Entry point modification to allow testing
+    entrypoint: ["/sbin/init"]
+    profiles:
+      - pve
+
+  # Ubuntu mode: Generic Ubuntu for Windows Docker compatibility
+  ubuntu-test:
+    image: ubuntu:22.04
+    container_name: pa-test-ubuntu
+    hostname: ubuntu-test
+    stdin_open: true
+    tty: true
+    restart: "no"
+    ports:
+      - "2223:22"       # SSH access for debugging (different port from PVE)
+    environment:
+      - PA_TEST_MODE=true
+      - DEBIAN_FRONTEND=noninteractive
+    volumes:
+      # Mount the agent code for testing
+      - ../:/proxmox-agent:ro
+      # Test volumes
+      - pa-test-logs:/var/log
+      - pa-test-data:/root
+    # Install systemd and required tools, then start
+    command: >
+      bash -c "
+        apt-get update &&
+        apt-get install -y systemd systemd-sysv bash curl git ssh ssh-client ssh-keygen tar coreutils sudo &&
+        systemctl enable systemd-logind &&
+        echo 'root:testpass123' | chpasswd &&
+        mkdir -p /var/run/sshd &&
+        /lib/systemd/systemd
+      "
+    privileged: true
+    security_opt:
+      - seccomp:unconfined
+    healthcheck:
+      test: ["CMD", "systemctl", "is-system-running"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 60s
+    profiles:
+      - ubuntu
+      - default
+
+  # Git server for backup target testing
+  git-server:
+    image: rockstorm/git-server:latest
+    container_name: pa-test-git
+    hostname: git-test
+    environment:
+      - GIT_USER=git
+      - GIT_PASSWORD=gittest123
+    volumes:
+      - pa-git-repos:/srv/git
+    # Create a test repo on startup
+    command: >
+      sh -c "
+        mkdir -p /srv/git/pve-config.git &&
+        cd /srv/git/pve-config.git &&
+        git init --bare &&
+        echo 'Test PVE backup repo' > description &&
+        /entrypoint.sh
+      "
+
+volumes:
+  pa-test-logs:
+  pa-test-data:
+  pa-git-repos:
