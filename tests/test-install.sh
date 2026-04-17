@@ -26,31 +26,31 @@ EOF
 git init --bare /tmp/fake-remote.git >/dev/null 2>&1
 
 info "Testing preflight checks..."
-if ! bash -c 'source bin/pa-agent-lib.sh && pa_ui_init && echo "Library loads OK"'; then
+if ! bash -c 'source bin/pcg-agent-lib.sh && pcg_ui_init && echo "Library loads OK"'; then
   fail "Failed to load agent library"
 fi
 
 info "Testing binary installation (dry-run)..."
 # In test mode, we can check if install would work
-PA_TEST_MODE=true ./bin/proxmox-agent preinstall-report | grep -q "blockers\|warnings" || true
+PA_TEST_MODE=true ./bin/pcg preinstall-report | grep -q "blockers\|warnings" || true
 
 info "Simulating install steps..."
 
 # Test 1: Check if binaries can be staged
-mkdir -p /tmp/pa-test-install/usr/local/bin
-cp bin/*.sh /tmp/pa-test-install/usr/local/bin/ 2>/dev/null || true
-cp bin/proxmox-agent /tmp/pa-test-install/usr/local/bin/ 2>/dev/null || true
+mkdir -p /tmp/pcg-test-install/usr/local/bin
+cp bin/*.sh /tmp/pcg-test-install/usr/local/bin/ 2>/dev/null || true
+cp bin/pcg /tmp/pcg-test-install/usr/local/bin/ 2>/dev/null || true
 
-if [[ -f /tmp/pa-test-install/usr/local/bin/proxmox-agent ]]; then
+if [[ -f /tmp/pcg-test-install/usr/local/bin/pcg ]]; then
   info "Binary staging: OK"
 else
   fail "Failed to stage binaries"
 fi
 
 # Test 2: Check systemd unit files can be staged
-mkdir -p /tmp/pa-test-install/etc/systemd/system
-if [[ -f systemd/pa-backup-config.service ]]; then
-  cp systemd/* /tmp/pa-test-install/etc/systemd/system/ 2>/dev/null || true
+mkdir -p /tmp/pcg-test-install/etc/systemd/system
+if [[ -f systemd/pcg-backup-config.service ]]; then
+  cp systemd/* /tmp/pcg-test-install/etc/systemd/system/ 2>/dev/null || true
   info "Unit file staging: OK"
 else
   warn "No systemd unit files found (may be expected in container)"

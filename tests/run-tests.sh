@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ============================================================
-# Proxmox Agent Test Runner
+# PVE Config Git (pcg) Test Runner
 # Automated testing using Proxmox VE Docker environment
 #
 # Modes:
@@ -65,7 +65,7 @@ check_deps() {
       missing+=("$cmd")
     fi
   done
-  
+
   if [[ ${#missing[@]} -gt 0 ]]; then
     error "Missing dependencies: ${missing[*]}"
     error "Please install Docker and Docker Compose"
@@ -94,24 +94,24 @@ wait_for_healthy() {
   local service="$1"
   local max_wait="${2:-120}"
   local elapsed=0
-  
+
   info "Waiting for $service to be healthy (max ${max_wait}s)..."
-  
+
   while [[ $elapsed -lt $max_wait ]]; do
     local status
     status=$(docker-compose -f "$COMPOSE_FILE" ps -q "$service" 2>/dev/null | \
       xargs docker inspect -f '{{.State.Health.Status}}' 2>/dev/null || echo "unknown")
-    
+
     if [[ "$status" == "healthy" ]]; then
       info "$service is healthy"
       return 0
     fi
-    
+
     sleep 5
     elapsed=$((elapsed + 5))
     echo -n "."
   done
-  
+
   error "Timeout waiting for $service"
   docker-compose -f "$COMPOSE_FILE" logs "$service" --tail 50
   return 1
@@ -119,37 +119,37 @@ wait_for_healthy() {
 
 # Copy agent code into container
 copy_agent_to_container() {
-  info "Copying agent code to test container..."
-  
+  info "Copying pcg code to test container..."
+
   # Create a tar archive of the agent code
   local tar_file
   tar_file=$(mktemp)
-  
+
   (cd "$ROOT_DIR" && tar -czf "$tar_file" --exclude='.git' --exclude='tests' .)
-  
+
   # Copy and extract in container
-  docker-compose -f "$COMPOSE_FILE" cp "$tar_file" "$TEST_SERVICE:/tmp/agent.tar.gz"
+  docker-compose -f "$COMPOSE_FILE" cp "$tar_file" "$TEST_SERVICE:/tmp/pcg.tar.gz"
   docker-compose -f "$COMPOSE_FILE" exec -T "$TEST_SERVICE" bash -c '
-    mkdir -p /proxmox-agent &&
-    cd /proxmox-agent &&
-    tar -xzf /tmp/agent.tar.gz &&
-    rm /tmp/agent.tar.gz &&
+    mkdir -p /pcg &&
+    cd /pcg &&
+    tar -xzf /tmp/pcg.tar.gz &&
+    rm /tmp/pcg.tar.gz &&
     chmod +x bin/*.sh install.sh 2>/dev/null || true
   '
-  
+
   rm -f "$tar_file"
-  info "Agent code copied successfully"
+  info "pcg code copied successfully"
 }
 
 # Run a test inside the container
 run_test_in_container() {
   local test_name="$1"
   local test_script="$2"
-  
+
   info "Running test: $test_name"
-  
+
   if docker-compose -f "$COMPOSE_FILE" exec -T "$TEST_SERVICE" bash -c "
-    cd /proxmox-agent &&
+    cd /pcg &&
     export PA_TEST_MODE=true &&
     export GIT_REMOTE_URL='ssh://git@git-test/srv/git/pve-config.git' &&
     export PA_LOG_RETENTION_DAYS=7 &&
@@ -186,51 +186,51 @@ print_mode_banner() {
 # Main test execution
 main() {
   print_mode_banner
-  
-  info "Proxmox Agent Test Runner"
+
+  info "PVE Config Git (pcg) Test Runner"
   info "=========================="
-  
+
   check_deps
-  
+
   # Start the test environment
   info "Starting test environment ($TEST_SERVICE)..."
   docker-compose -f "$COMPOSE_FILE" down -v 2>/dev/null || true
   docker-compose -f "$COMPOSE_FILE" --profile "$TEST_PROFILE" up -d
-  
+
   # Wait for container to be ready
   wait_for_healthy "$TEST_SERVICE"
-  
+
   # Copy agent code
   copy_agent_to_container
-  
+
   # Run tests
   local failed=0
-  
+
   # Test 1: Doctor (pre-install check)
   if ! run_test_in_container "Doctor Pre-Install" "bash tests/test-doctor.sh"; then
     ((failed++)) || true
   fi
-  
+
   # Test 2: Installation
   if ! run_test_in_container "Installation" "bash tests/test-install.sh"; then
     ((failed++)) || true
   fi
-  
+
   # Test 3: Post-install doctor
   if ! run_test_in_container "Doctor Post-Install" "bash tests/test-doctor.sh"; then
     ((failed++)) || true
   fi
-  
+
   # Test 4: Backup dry-run
   if ! run_test_in_container "Backup Dry-Run" "bash tests/test-backup.sh"; then
     ((failed++)) || true
   fi
-  
+
   # Test 5: Shutdown script (dry-run)
   if ! run_test_in_container "Shutdown Dry-Run" "bash tests/test-shutdown.sh"; then
     ((failed++)) || true
   fi
-  
+
   # Summary
   info "=========================="
   if [[ $failed -eq 0 ]]; then
@@ -247,7 +247,7 @@ show_help() {
   cat <<'EOF'
 Usage: run-tests.sh [OPTIONS]
 
-Run automated tests for Proxmox Agent using Docker environment.
+Run automated tests for PVE Config Git (pcg) using Docker environment.
 
 MODES:
   Default (Ubuntu mode):  Uses Ubuntu 22.04 container - compatible with Windows Docker
@@ -295,14 +295,14 @@ EOF
 detect_platform() {
   local is_windows
   is_windows=$(detect_windows)
-  
+
   echo ""
   info "Platform Detection"
   info "=================="
-  
+
   # Show OS info
   info "Detected OS type: ${OSTYPE:-unknown}"
-  
+
   # Show Docker info
   if docker info >/dev/null 2>&1; then
     info "Docker: Available"
@@ -310,7 +310,7 @@ detect_platform() {
   else
     error "Docker: Not available or not running"
   fi
-  
+
   # Windows detection
   if [[ "$is_windows" == "true" ]] || [[ "$is_windows" == "possible" ]]; then
     warn "Windows environment detected"
@@ -322,7 +322,7 @@ detect_platform() {
     info "  - Ubuntu mode: ./run-tests.sh (faster, tests structure)"
     info "  - PVE mode:    ./run-tests.sh --pve-mode (tests actual PVE)"
   fi
-  
+
   echo ""
 }
 
@@ -356,9 +356,9 @@ case "${1:-}" in
     ;;
   --shell)
     # Determine which service is running
-    if docker-compose -f "$COMPOSE_FILE" ps | grep -q "pa-test-pve"; then
+    if docker-compose -f "$COMPOSE_FILE" ps | grep -q "pcg-test-pve"; then
       docker-compose -f "$COMPOSE_FILE" exec pve-test bash
-    elif docker-compose -f "$COMPOSE_FILE" ps | grep -q "pa-test-ubuntu"; then
+    elif docker-compose -f "$COMPOSE_FILE" ps | grep -q "pcg-test-ubuntu"; then
       docker-compose -f "$COMPOSE_FILE" exec ubuntu-test bash
     else
       error "No test container is running. Start tests first or use --keep flag."
