@@ -46,13 +46,13 @@ PCG (Proxmox Config Git) is a lightweight Bash + systemd toolkit that **backs up
   - `pcg upgrade [--channel stable|edge] [--target <tag>]`
 - Automatic backup/rollback safety during install and upgrade.
 
-## Requirements (Read This Before Installing)
+## ⚠️ Requirements (Read This Before Installing)
 
 Before you run the installer, make sure you have ALL of the following ready:
 
 ### 1. GitHub Repository (Empty Repo Ready)
 
-You need a **private GitHub repository** created and waiting. This is where your Proxmox config will be stored.
+You need a **private GitHub repository** created and waiting. This is where your Proxmox config will be stored. This is a required item for the installer to work.
 
 - Go to GitHub → Create a new repository → Make it **private**
 - **Do NOT initialize it with a README, .gitignore, or license** — leave it completely empty
@@ -61,7 +61,7 @@ You need a **private GitHub repository** created and waiting. This is where your
 
 ### 2. SSH Key Authentication (Proxmox VE Shell)
 
-**You must run the installer from the Proxmox VE shell** (not from inside a VM or container). This is the actual host node's command line.
+**You must run the installer from the Proxmox VE shell** (not from inside a VM or container). This is the actual host node's command line. This is a required item for the installer to work.
 
 #### Step-by-step SSH Setup for Beginners:
 
@@ -89,6 +89,9 @@ You need a **private GitHub repository** created and waiting. This is where your
    - Click "Add SSH key"
 
 5. **Test the Connection:**
+
+Run this inside Proxmox VE Shell
+
    ```bash
    ssh -T git@github.com
    # You should see: "Hi username! You've successfully authenticated..."
@@ -98,7 +101,7 @@ You need a **private GitHub repository** created and waiting. This is where your
 
 ### 3. Notification Method Ready (Required)
 
-You MUST have at least one notification method configured. The installer will ask for this.
+You MUST have at least one notification method configured. The installer will ask for this. This is a required item for the installer to work.
 
 #### Option A: Telegram Bot (Easiest for Most Users)
 
