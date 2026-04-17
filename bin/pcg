@@ -376,7 +376,7 @@ preflight_checks() {
     fi
   done
   if is_test_mode; then
-    ui_warn "PA_TEST_MODE=true -> skipping hard dependency check for systemctl."
+    ui_warn "PCG_TEST_MODE=true -> skipping hard dependency check for systemctl."
   else
     if command -v systemctl >/dev/null 2>&1; then
       ui_ok "dependency: systemctl"
@@ -707,7 +707,7 @@ guided_env_setup() {
   webhook_token="${WEBHOOK_BEARER_TOKEN:-}"
 
   if [ -f "$PCG_ENV_DRAFT" ]; then
-    ui_info "Saved installer settings found: $PA_ENV_DRAFT"
+    ui_info "Saved installer settings found: $PCG_ENV_DRAFT"
     if [ "$force_resume" -eq 1 ]; then
       if load_install_draft; then
         repo_dir="${DRAFT_REPO_DIR:-$repo_dir}"
@@ -964,7 +964,7 @@ collect_preinstall_report_data() {
     PRE_BLOCKERS+=("Missing dependencies: ${PRE_DEPS_MISSING[*]}")
   fi
 
-  if [ -f "$PA_RUNTIME_VERSION_FILE" ]; then
+  if [ -f "$PCG_RUNTIME_VERSION_FILE" ]; then
     PRE_INSTALL_STATE="canonical"
   elif detect_legacy_artifacts; then
     PRE_INSTALL_STATE="legacy"
@@ -1064,16 +1064,16 @@ print_preinstall_report_text() {
 print_preinstall_report_json() {
   local first
   printf '{"read_only":true'
-  printf ',"install_state":"%s"' "$(pa_json_escape "$PRE_INSTALL_STATE")"
-  printf ',"installed_version":"%s"' "$(pa_json_escape "$PRE_CURRENT_VERSION")"
-  printf ',"env_source":"%s"' "$(pa_json_escape "$PRE_ENV_SOURCE")"
+  printf ',"install_state":"%s"' "$(pcg_json_escape "$PRE_INSTALL_STATE")"
+  printf ',"installed_version":"%s"' "$(pcg_json_escape "$PRE_CURRENT_VERSION")"
+  printf ',"env_source":"%s"' "$(pcg_json_escape "$PRE_ENV_SOURCE")"
   printf ',"legacy_units_present":['
   first=1
   local item
   for item in "${PRE_LEGACY_UNITS_PRESENT[@]}"; do
     [ "$first" -eq 1 ] || printf ','
     first=0
-    printf '"%s"' "$(pa_json_escape "$item")"
+    printf '"%s"' "$(pcg_json_escape "$item")"
   done
   printf ']'
   printf ',"planned_actions":['
@@ -1081,7 +1081,7 @@ print_preinstall_report_json() {
   for item in "${PRE_ACTIONS[@]}"; do
     [ "$first" -eq 1 ] || printf ','
     first=0
-    printf '"%s"' "$(pa_json_escape "$item")"
+    printf '"%s"' "$(pcg_json_escape "$item")"
   done
   printf ']'
   printf ',"blockers":['
@@ -1089,7 +1089,7 @@ print_preinstall_report_json() {
   for item in "${PRE_BLOCKERS[@]}"; do
     [ "$first" -eq 1 ] || printf ','
     first=0
-    printf '"%s"' "$(pa_json_escape "$item")"
+    printf '"%s"' "$(pcg_json_escape "$item")"
   done
   printf ']'
   printf ',"warnings":['
@@ -1097,7 +1097,7 @@ print_preinstall_report_json() {
   for item in "${PRE_WARNINGS[@]}"; do
     [ "$first" -eq 1 ] || printf ','
     first=0
-    printf '"%s"' "$(pa_json_escape "$item")"
+    printf '"%s"' "$(pcg_json_escape "$item")"
   done
   printf ']'
   printf ',"notes":['
@@ -1105,7 +1105,7 @@ print_preinstall_report_json() {
   for item in "${PRE_NOTES[@]}"; do
     [ "$first" -eq 1 ] || printf ','
     first=0
-    printf '"%s"' "$(pa_json_escape "$item")"
+    printf '"%s"' "$(pcg_json_escape "$item")"
   done
   printf ']}'
   echo
@@ -1128,7 +1128,7 @@ cmd_preinstall_report() {
 
 configure_repo_remote_if_needed() {
   local repo_dir branch remote_from_env repo_created remote_action git_commit_name git_commit_email
-  pa_load_env
+  pcg_load_env
   repo_dir="${REPO_DIR:-/root/pve-config}"
   branch="${REPO_BRANCH:-main}"
   remote_from_env="${GIT_REMOTE_URL:-}"
@@ -1178,11 +1178,11 @@ configure_repo_remote_if_needed() {
 validate_git_remote_access() {
   local repo_dir quiet
   quiet="${1:-0}"
-  pa_load_env
+  pcg_load_env
   repo_dir="${REPO_DIR:-/root/pve-config}"
 
   if ! git -C "$repo_dir" remote get-url origin >/dev/null 2>&1; then
-    [ "$quiet" = "1" ] || echo "Missing git origin remote in $repo_dir. Set GIT_REMOTE_URL in $PA_ENV_TARGET or add origin manually."
+    [ "$quiet" = "1" ] || echo "Missing git origin remote in $repo_dir. Set GIT_REMOTE_URL in $PCG_ENV_TARGET or add origin manually."
     return 1
   fi
 
@@ -1196,23 +1196,23 @@ validate_git_remote_access() {
 
 detect_legacy_artifacts() {
   local f
-  for f in "${PA_LEGACY_BIN_FILES[@]}"; do
-    [ -e "$PA_BIN_TARGET/$f" ] && return 0
+  for f in "${PCG_LEGACY_BIN_FILES[@]}"; do
+    [ -e "$PCG_BIN_TARGET/$f" ] && return 0
   done
-  for f in "${PA_LEGACY_UNIT_FILES[@]}"; do
-    [ -e "$PA_SYSTEMD_TARGET/$f" ] && return 0
+  for f in "${PCG_LEGACY_UNIT_FILES[@]}"; do
+    [ -e "$PCG_SYSTEMD_TARGET/$f" ] && return 0
   done
-  [ -e "$PA_ENV_LEGACY" ] && return 0
-  [ -e "$PA_RUNTIME_VERSION_LEGACY" ] && return 0
+  [ -e "$PCG_ENV_LEGACY" ] && return 0
+  [ -e "$PCG_RUNTIME_VERSION_LEGACY" ] && return 0
   return 1
 }
 
 count_legacy_artifacts() {
   local c=0 f
-  for f in "${PA_LEGACY_BIN_FILES[@]}"; do [ -e "$PA_BIN_TARGET/$f" ] && c=$((c + 1)); done
-  for f in "${PA_LEGACY_UNIT_FILES[@]}"; do [ -e "$PA_SYSTEMD_TARGET/$f" ] && c=$((c + 1)); done
-  [ -e "$PA_ENV_LEGACY" ] && c=$((c + 1))
-  [ -e "$PA_RUNTIME_VERSION_LEGACY" ] && c=$((c + 1))
+  for f in "${PCG_LEGACY_BIN_FILES[@]}"; do [ -e "$PCG_BIN_TARGET/$f" ] && c=$((c + 1)); done
+  for f in "${PCG_LEGACY_UNIT_FILES[@]}"; do [ -e "$PCG_SYSTEMD_TARGET/$f" ] && c=$((c + 1)); done
+  [ -e "$PCG_ENV_LEGACY" ] && c=$((c + 1))
+  [ -e "$PCG_RUNTIME_VERSION_LEGACY" ] && c=$((c + 1))
   echo "$c"
 }
 
@@ -1220,7 +1220,7 @@ capture_unit_states() {
   local backup_dir="$1"
   local unit
   : > "$backup_dir/unit-states.txt"
-  for unit in "${PA_CANONICAL_UNIT_FILES[@]}" "${PA_LEGACY_UNIT_FILES[@]}"; do
+  for unit in "${PCG_CANONICAL_UNIT_FILES[@]}" "${PCG_LEGACY_UNIT_FILES[@]}"; do
     if systemctl is-enabled "$unit" >/dev/null 2>&1; then
       echo "$unit" >> "$backup_dir/unit-states.txt"
     fi
@@ -1229,9 +1229,9 @@ capture_unit_states() {
 
 disable_all_managed_units() {
   local unit
-  for unit in "${PA_CANONICAL_UNIT_FILES[@]}" "${PA_LEGACY_UNIT_FILES[@]}"; do
-    pa_systemctl stop "$unit" >/dev/null 2>&1 || true
-    pa_systemctl disable "$unit" >/dev/null 2>&1 || true
+  for unit in "${PCG_CANONICAL_UNIT_FILES[@]}" "${PCG_LEGACY_UNIT_FILES[@]}"; do
+    pcg_systemctl stop "$unit" >/dev/null 2>&1 || true
+    pcg_systemctl disable "$unit" >/dev/null 2>&1 || true
   done
 }
 
@@ -1242,8 +1242,8 @@ restore_unit_states() {
   if [ -f "$backup_dir/unit-states.txt" ]; then
     while IFS= read -r unit; do
       [ -n "$unit" ] || continue
-      pa_systemctl enable "$unit" >/dev/null 2>&1 || true
-      [[ "$unit" == *.timer ]] && pa_systemctl start "$unit" >/dev/null 2>&1 || true
+      pcg_systemctl enable "$unit" >/dev/null 2>&1 || true
+      [[ "$unit" == *.timer ]] && pcg_systemctl start "$unit" >/dev/null 2>&1 || true
     done < "$backup_dir/unit-states.txt"
   fi
 }
@@ -1345,7 +1345,7 @@ perform_uninstall() {
   cleanup_managed_artifacts
   remove_legacy_artifacts
   clear_install_draft
-  pa_systemctl daemon-reload
+  pcg_systemctl daemon-reload
 
   ui_ok "Uninstall complete."
   ui_info "Backup snapshot saved at: $backup_dir"
@@ -1578,8 +1578,8 @@ cmd_install() {
 
   local ts backup_dir legacy_before migrated
   ts="$(date +%Y%m%d-%H%M%S)"
-  backup_dir="$PA_BACKUP_DIR_BASE/install-$ts"
-  mkdir -p "$PA_BACKUP_DIR_BASE"
+  backup_dir="$PCG_BACKUP_DIR_BASE/install-$ts"
+  mkdir -p "$PCG_BACKUP_DIR_BASE"
   backup_current_install "$backup_dir"
 
   legacy_before=0
@@ -1784,8 +1784,8 @@ extract_edge_source() {
 cmd_upgrade() {
   require_root
 
-  pa_load_version
-  pa_load_env
+  pcg_load_version
+  pcg_load_env
 
   local channel target source
   channel="${AGENT_UPDATE_CHANNEL:-stable}"
@@ -1808,8 +1808,8 @@ cmd_upgrade() {
   local tmpdir srcdir target_version current_version ts backup_dir rc legacy_before migrated
   tmpdir="$(mktemp -d)"
   ts="$(date +%Y%m%d-%H%M%S)"
-  backup_dir="$PA_BACKUP_DIR_BASE/upgrade-$ts"
-  mkdir -p "$PA_BACKUP_DIR_BASE"
+  backup_dir="$PCG_BACKUP_DIR_BASE/upgrade-$ts"
+  mkdir -p "$PCG_BACKUP_DIR_BASE"
   backup_current_install "$backup_dir"
 
   current_version="${AGENT_VERSION:-unknown}"
