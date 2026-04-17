@@ -1,0 +1,13 @@
+[Unit]
+Description=PCG (Proxmox Config Git) - Run config backup
+
+[Service]
+Type=oneshot
+EnvironmentFile=/root/.pcg-agent.env
+ExecStart=/usr/local/bin/pcg-backup-config.sh
+TimeoutStartSec=600
+StandardOutput=append:/var/log/pcg-backup-config.log
+StandardError=append:/var/log/pcg-backup-config.log
+
+[Install]
+WantedBy=multi-user.target

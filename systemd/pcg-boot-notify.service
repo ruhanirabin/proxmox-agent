@@ -1,0 +1,17 @@
+[Unit]
+Description=PCG (Proxmox Config Git) - Send Telegram message on Proxmox boot
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+EnvironmentFile=/root/.pcg-agent.env
+TimeoutStartSec=30
+ExecStartPre=/bin/sleep 5
+ExecStart=/usr/local/bin/pcg-boot-notify.sh
+ExecStartPost=/bin/bash -c 'sleep 10 && /usr/local/bin/pcg-boot-notify.sh || true'
+StandardOutput=append:/var/log/pcg-boot-notify.log
+StandardError=append:/var/log/pcg-boot-notify.log
+
+[Install]
+WantedBy=multi-user.target

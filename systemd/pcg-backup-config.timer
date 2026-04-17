@@ -1,11 +1,11 @@
 [Unit]
-Description=Run Proxmox config backup periodically
+Description=PCG (Proxmox Config Git) - Run config backup periodically
 
 [Timer]
 OnBootSec=5min
 OnCalendar=*-*-* 13:00:00
 OnUnitActiveSec=6h
-Unit=pa-backup-config.service
+Unit=pcg-backup-config.service
 RandomizedDelaySec=10min
 Persistent=true
 AccuracySec=1min
