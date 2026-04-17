@@ -2,9 +2,9 @@
 
 set -euo pipefail
 
-PA_WORK_DIR="/tmp/proxmox-agent-install"
+PA_WORK_DIR="/tmp/pcg-install"
 PA_BRANCH="${PA_BRANCH:-main}"
-PA_REPO_SLUG="${PA_REPO_SLUG:-ruhanirabin/proxmox-agent}"
+PA_REPO_SLUG="${PA_REPO_SLUG:-ruhanirabin/pve-config-git}"
 PA_INSTALL_MODE="${PA_INSTALL_MODE:-auto}"
 PA_BANNER_FILE=""
 PA_CAN_COLOR=0
@@ -75,12 +75,12 @@ get_installer_version() {
     return 0
   fi
   version_url="https://raw.githubusercontent.com/${PA_REPO_SLUG}/${PA_BRANCH}/VERSION"
-  if curl -fsSL "$version_url" >/tmp/pa-installer-version 2>/dev/null; then
-    tr -d '[:space:]' < /tmp/pa-installer-version
-    rm -f /tmp/pa-installer-version
+  if curl -fsSL "$version_url" >/tmp/pcg-installer-version 2>/dev/null; then
+    tr -d '[:space:]' < /tmp/pcg-installer-version
+    rm -f /tmp/pcg-installer-version
     return 0
   fi
-  rm -f /tmp/pa-installer-version
+  rm -f /tmp/pcg-installer-version
   echo "unknown"
 }
 
@@ -108,7 +108,7 @@ run_with_spinner() {
   local label="$1"
   shift
   local pid spin='|/-\' i=0
-  "$@" >/tmp/pa-installer-cmd.out 2>/tmp/pa-installer-cmd.err &
+  "$@" >/tmp/pcg-installer-cmd.out 2>/tmp/pcg-installer-cmd.err &
   pid=$!
   while kill -0 "$pid" 2>/dev/null; do
     i=$(( (i + 1) % 4 ))
@@ -121,10 +121,10 @@ run_with_spinner() {
     printf '\r%s%s%s %s\n' "$C_GREEN" "$ICON_OK" "$C_RESET" "$label" >&2
   else
     printf '\r%s%s%s %s\n' "$C_RED" "$ICON_ERR" "$C_RESET" "$label" >&2
-    cat /tmp/pa-installer-cmd.err >&2 || true
-    cat /tmp/pa-installer-cmd.out >&2 || true
+    cat /tmp/pcg-installer-cmd.err >&2 || true
+    cat /tmp/pcg-installer-cmd.out >&2 || true
   fi
-  rm -f /tmp/pa-installer-cmd.out /tmp/pa-installer-cmd.err
+  rm -f /tmp/pcg-installer-cmd.out /tmp/pcg-installer-cmd.err
   return "$rc"
 }
 
@@ -285,14 +285,16 @@ print_intro() {
   installer_version="$(get_installer_version)"
   repo_url="https://github.com/${PA_REPO_SLUG}"
   print_divider
-  echo "${C_BOLD}Proxmox Agent Guided Installer${C_RESET}" >&2
+  echo "${C_BOLD}Proxmox (PVE) Config Git${C_RESET}" >&2
   echo "${C_CYAN}Version:${C_RESET} v${installer_version}" >&2
   echo "${C_CYAN}By:${C_RESET} Ruhani Rabin" >&2
   echo "${C_CYAN}Website:${C_RESET} ${repo_url}" >&2
   print_divider
   ui_info "This installer will validate host prerequisites, detect old installs,"
-  ui_info "fetch source, and run a guided proxmox-agent install."
+  ui_info "fetch source, and run a guided pcg install."
   echo >&2
+  ui_warn "NOTE: This project was renamed from 'proxmox-agent' to 'pve-config-git'."
+  ui_warn "Legacy 'proxmox-agent' or 'pa-*' installs will be automatically migrated."
 }
 
 preflight() {
@@ -328,19 +330,25 @@ preflight() {
 }
 
 detect_existing() {
-  if [ -f /usr/local/bin/pa-agent-version ]; then
+  if [ -f /usr/local/bin/pcg-agent-version ]; then
+    # shellcheck disable=SC1091
+    source /usr/local/bin/pcg-agent-version || true
+    ui_info "Detected pcg install: v${AGENT_VERSION:-unknown}"
+  elif [ -f /usr/local/bin/pa-agent-version ]; then
     # shellcheck disable=SC1091
     source /usr/local/bin/pa-agent-version || true
-    ui_info "Detected canonical install: v${AGENT_VERSION:-unknown}"
+    ui_warn "Detected legacy pa-* install: v${AGENT_VERSION:-unknown} - will migrate"
   elif [ -f /usr/local/bin/proxmox-agent-version ]; then
     # shellcheck disable=SC1091
     source /usr/local/bin/proxmox-agent-version || true
-    ui_warn "Detected legacy install: v${AGENT_VERSION:-unknown}"
+    ui_warn "Detected legacy proxmox-agent install: v${AGENT_VERSION:-unknown} - will migrate"
   else
     ui_info "No existing installed version file detected."
   fi
 
-  if compgen -G "/etc/systemd/system/backup-config.*" >/dev/null || \
+  if compgen -G "/etc/systemd/system/pcg-backup-config.*" >/dev/null || \
+     compgen -G "/etc/systemd/system/pa-backup-config.*" >/dev/null || \
+     compgen -G "/etc/systemd/system/backup-config.*" >/dev/null || \
      [ -f /etc/systemd/system/proxmox-bootup-telegram.service ] || \
      [ -f /etc/systemd/system/shutdown-proxmox.service ]; then
     ui_warn "Legacy unit names detected; migration will run automatically."
@@ -351,7 +359,7 @@ fetch_source() {
   rm -rf "$PA_WORK_DIR"
   mkdir -p "$PA_WORK_DIR"
 
-  if [ -x "./bin/proxmox-agent" ] && [ -f "./VERSION" ] && [ "$PA_INSTALL_MODE" != "remote" ]; then
+  if [ -x "./bin/pcg" ] && [ -f "./VERSION" ] && [ "$PA_INSTALL_MODE" != "remote" ]; then
     ui_ok "Using local repository source."
     echo "$(pwd)"
     return 0
@@ -371,8 +379,8 @@ fetch_source() {
   run_with_spinner "Extract archive" tar -xzf "$archive" -C "$PA_WORK_DIR" || die "Failed to extract source archive."
 
   local srcdir
-  srcdir="$(find "$PA_WORK_DIR" -maxdepth 3 -type f -name proxmox-agent | head -n 1 | xargs dirname)"
-  [ -n "$srcdir" ] || die "Could not locate bin/proxmox-agent in extracted archive."
+  srcdir="$(find "$PA_WORK_DIR" -maxdepth 3 -type f -name pcg | head -n 1 | xargs dirname)"
+  [ -n "$srcdir" ] || die "Could not locate bin/pcg in extracted archive."
   echo "$(cd "$srcdir/.." && pwd)"
 }
 
@@ -394,19 +402,19 @@ main() {
   ui_info "Source root: $src_root"
 
   step=$((step + 1)); progress_line "$step" "$total" "Prepare installer binary"
-  [ -x "$src_root/bin/proxmox-agent" ] || chmod +x "$src_root/bin/proxmox-agent"
+  [ -x "$src_root/bin/pcg" ] || chmod +x "$src_root/bin/pcg"
 
   step=$((step + 1)); progress_line "$step" "$total" "Preinstall simulation report"
   ui_step "Generating simulation report..."
-  (cd "$src_root" && ./bin/proxmox-agent preinstall-report) || true
+  (cd "$src_root" && ./bin/pcg preinstall-report) || true
 
   step=$((step + 1)); progress_line "$step" "$total" "Run guided install"
   if ! prompt_yes_no "Proceed with installation changes on this host?" "n"; then
     ui_warn "Installer aborted before making changes."
     exit 0
   fi
-  ui_step "Starting proxmox-agent install..."
-  (cd "$src_root" && ./bin/proxmox-agent install)
+  ui_step "Starting pcg install..."
+  (cd "$src_root" && ./bin/pcg install)
 
   ui_ok "Installer finished successfully."
 }

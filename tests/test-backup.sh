@@ -38,7 +38,7 @@ info "Testing backup script execution (may fail due to missing PVE files)..."
 
 # The backup script will fail in Docker because there's no real PVE,
 # but we can test the script structure and basic flow
-if ! bash -n bin/pa-backup-config.sh; then
+if ! bash -n bin/pcg-backup-config.sh; then
   fail "Backup script has syntax errors"
 fi
 
@@ -46,14 +46,14 @@ info "Backup script syntax: OK"
 
 # Test the backup from outside the repo (it should detect this)
 cd /tmp
-if ./proxmox-agent/bin/pa-backup-config.sh 2>&1 | grep -q "Backup complete\|No changes"; then
+if ./pcg/bin/pcg-backup-config.sh 2>&1 | grep -q "Backup complete\|No changes"; then
   info "Backup script executed (may have no changes - that's OK in test)"
 else
   warn "Backup script may have encountered issues (expected in test environment)"
 fi
 
 # Check log file was created
-if [[ -f /tmp/test-backup.log ]] || [[ -f /var/log/pa-backup-config.log ]]; then
+if [[ -f /tmp/test-backup.log ]] || [[ -f /var/log/pcg-backup-config.log ]]; then
   info "Backup logging: OK"
 else
   warn "No backup log file found"

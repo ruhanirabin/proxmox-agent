@@ -24,7 +24,7 @@ docker run --rm -i \
 
     # Guided answers:
     # install.sh confirm -> y
-    # proxmox-agent install confirm -> y
+    # pcg install confirm -> y
     # repo dir -> /root/pve-config
     # branch -> main
     # git remote -> /tmp/remote.git

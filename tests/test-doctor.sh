@@ -11,7 +11,7 @@ fail() { echo "[TEST:DOCTOR:FAIL] $*" >&2; exit 1; }
 
 info "Running doctor preinstall-report..."
 
-if ! ./bin/proxmox-agent preinstall-report >/tmp/doctor-output.txt 2>&1; then
+if ! ./bin/pcg preinstall-report >/tmp/doctor-output.txt 2>&1; then
   # Preinstall-report may fail due to missing remote URL, which is expected
   info "Preinstall-report completed (may show blockers - that's OK)"
 fi
@@ -27,7 +27,7 @@ fi
 
 # Check JSON output works
 info "Testing JSON output..."
-if ! ./bin/proxmox-agent preinstall-report --json >/tmp/doctor-json.txt 2>&1; then
+if ! ./bin/pcg preinstall-report --json >/tmp/doctor-json.txt 2>&1; then
   info "JSON report completed (may show blockers)"
 fi
 
