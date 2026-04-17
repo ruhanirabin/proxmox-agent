@@ -1,8 +1,25 @@
 # Proxmox Agent
 
-Proxmox Agent is a lightweight Bash + systemd toolkit that snapshots important Proxmox host configuration into your private Git repository, on schedule and on shutdown, with optional Telegram/Webhook notifications.
+> **Quick Links:** [Changelog](docs/CHANGELOG.md) • [License](LICENSE)
 
-It is designed for operators who want a practical change-history trail for node config without standing up a full backup platform.
+Proxmox Agent is a lightweight Bash + systemd toolkit that **backs up your Proxmox host configuration files to GitHub** — giving you a complete history of every change made to your node setup.
+
+## ⚠️ Important: What This Tool Does (And Doesn't Do)
+
+**This tool backs up CONFIGURATION FILES, not your virtual machines.**
+
+| This Tool DOES | This Tool DOES NOT |
+|----------------|-------------------|
+| ✅ Backup Proxmox config files (`/etc/pve/`, `/etc/network/interfaces`, etc.) | ❌ Backup VM/LXC disk images or container files |
+| ✅ Track changes to your node setup over time in Git | ❌ Create full system images for disaster recovery |
+| ✅ Let you see WHO changed WHAT and WHEN | ❌ Replace traditional VM backup solutions |
+| ✅ Help you rollback configuration mistakes | ❌ Backup your actual VMs or their data |
+
+**Why this matters:** If you accidentally break your network config or delete a storage pool, this tool lets you see exactly what changed and restore the working config. But if your VM's hard drive corrupts, you'll need a proper VM backup solution (like Proxmox Backup Server or `vzdump`).
+
+**The original idea:** I made this so I can go back in time and see what was changed on my Proxmox configuration using Git. Think of it as "version control for your server setup."
+
+---
 
 ## What it helps with
 
@@ -28,16 +45,96 @@ It is designed for operators who want a practical change-history trail for node 
   - `proxmox-agent upgrade [--channel stable|edge] [--target <tag>]`
 - Automatic backup/rollback safety during install and upgrade.
 
-## Requirements
+## Requirements (Read This Before Installing)
 
-- Proxmox VE host with root shell access.
-- `bash`, `curl`, `git`, `ssh`, `ssh-keygen`, `tar`.
-- `systemctl` (required for live install; skipped only in `PA_TEST_MODE=true`).
-- A reachable Git remote (SSH recommended).
+Before you run the installer, make sure you have ALL of the following ready:
+
+### 1. GitHub Repository (Empty Repo Ready)
+
+You need a **private GitHub repository** created and waiting. This is where your Proxmox config will be stored.
+
+- Go to GitHub → Create a new repository → Make it **private**
+- **Do NOT initialize it with a README, .gitignore, or license** — leave it completely empty
+- The installer will set this up as your backup destination
+- Example URL: `git@github.com:yourusername/proxmox-config-backup.git`
+
+### 2. SSH Key Authentication (Proxmox VE Shell)
+
+**You must run the installer from the Proxmox VE shell** (not from inside a VM or container). This is the actual host node's command line.
+
+#### Step-by-step SSH Setup for Beginners:
+
+1. **Open the Proxmox VE Shell:**
+   - In the Proxmox web UI, click on your node name (left sidebar)
+   - Click "Shell" to open a terminal to the actual host
+   - **Important:** You cannot SSH into a VM and run this — it must be the Proxmox host itself
+
+2. **Generate an SSH Key (if you don't have one):**
+   ```bash
+   ssh-keygen -t ed25519 -C "proxmox-backup"
+   # Press Enter to accept default location (no passphrase needed for automation)
+   ```
+
+3. **Copy Your Public Key:**
+   ```bash
+   cat /root/.ssh/id_ed25519.pub
+   ```
+   Copy the entire output (starts with `ssh-ed25519`)
+
+4. **Add Key to GitHub:**
+   - Go to GitHub → Settings → SSH and GPG keys → New SSH key
+   - Title: "Proxmox Backup"
+   - Paste the key you copied
+   - Click "Add SSH key"
+
+5. **Test the Connection:**
+   ```bash
+   ssh -T git@github.com
+   # You should see: "Hi username! You've successfully authenticated..."
+   ```
+
+**Note:** Each Proxmox node needs its own SSH key added to GitHub if you're backing up multiple nodes.
+
+### 3. Notification Method Ready (Required)
+
+You MUST have at least one notification method configured. The installer will ask for this.
+
+#### Option A: Telegram Bot (Easiest for Most Users)
+
+1. **Create a bot with BotFather:**
+   - Open Telegram and message [@BotFather](https://t.me/botfather)
+   - Send `/newbot` and follow prompts
+   - Save the **bot token** (looks like: `123456789:ABCdefGHIjklMNOpqrSTUvwxyz`)
+
+2. **Get Your Chat ID:**
+   - Message your new bot once to start it
+   - Visit: `https://api.telegram.org/bot<YOUR_BOT_TOKEN>/getUpdates`
+   - Look for `"chat":{"id":12345678` — that number is your **chat ID**
+
+3. **You'll enter these during installation:**
+   - Bot Token: `123456789:ABCdefGHIjklMNOpqrSTUvwxyz`
+   - Chat ID: `12345678`
+
+#### Option B: Webhook Endpoint
+
+If you have your own notification system (Discord, Slack, n8n, etc.), prepare:
+- Webhook URL where notifications should be sent
+- Bearer token if your webhook requires authentication
+
+### 4. Basic System Requirements
+
+- Proxmox VE host with root shell access
+- `bash`, `curl`, `git`, `ssh`, `ssh-keygen`, `tar` (usually pre-installed)
+- `systemctl` (required for live install; skipped only in `PA_TEST_MODE=true`)
+- Internet access from your Proxmox node to reach GitHub
+
+---
 
 ## Installation
 
 ### One-liner bootstrap (guided)
+
+**Remember:** Run this in the Proxmox VE shell, not inside a VM.
 
 ```bash
 bash -c "$(curl -fsSL https://raw.githubusercontent.com/ruhanirabin/proxmox-agent/main/install.sh)"
