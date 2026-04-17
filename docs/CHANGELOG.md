@@ -1,6 +1,6 @@
 ## 0.7.26
 
-- fix: replace non-atomic lockfile with `flock` atomic lock on `/var/lock/pa-shutdown.lock` to prevent race conditions.
+- fix: replace non-atomic lockfile with `flock` atomic lock on `/var/lock/pcg-shutdown.lock` to prevent race conditions.
 - feat: add shutdown-state detection to prevent re-entry during system shutdown phase (detects `systemctl is-system-running` stopping state).
 - improve: add PID/PPID execution tracing for debugging double-trigger scenarios (HA + systemd overlap).
 - improve: move lock file from `/tmp/` to `/var/lock/` for proper system-standard persistence.
@@ -13,8 +13,8 @@
 
 ## 0.7.24
 
-- feat: add early installed-state action menu in `proxmox-agent install` with `Reinstall`, `Uninstall`, or `Exit without making changes`.
-- feat: add `proxmox-agent uninstall` command to remove managed scripts, units, runtime version file, env files, and saved install draft.
+- feat: add early installed-state action menu in `pcg install` with `Reinstall`, `Uninstall`, or `Exit without making changes`.
+- feat: add `pcg uninstall` command to remove managed scripts, units, runtime version file, env files, and saved install draft.
 - improve: keep reinstall path interactive for refactoring env variables while exposing a clear no-change exit path.
 
 ## 0.7.23
@@ -25,7 +25,7 @@
 ## 0.7.22
 
 - improve: add prominent installer identity block (version/author/website) in bootstrap `install.sh` output.
-- improve: mirror the same identity block style in `proxmox-agent install` for consistent guided-install UX.
+- improve: mirror the same identity block style in `pcg install` for consistent guided-install UX.
 
 ## 0.7.21
 
@@ -83,8 +83,8 @@
 
 ## 0.7.11
 
-- fix: prefer repo-local `pa-agent-lib.sh` during source-based runs so guided preinstall/install use matching library functions.
-- fix: prevent `pa_ui_init: command not found` when hosts have older installed library versions and bootstrap runs newer fetched CLI code.
+- fix: prefer repo-local `pcg-agent-lib.sh` during source-based runs so guided preinstall/install use matching library functions.
+- fix: prevent `pcg_ui_init: command not found` when hosts have older installed library versions and bootstrap runs newer fetched CLI code.
 
 ## 0.7.10
 
@@ -103,7 +103,7 @@
 
 ## 0.7.8
 
-- feat: add read-only preinstall simulation command (`proxmox-agent preinstall-report` / `pa-doctor`) showing current state, planned changes, blockers, and warnings.
+- feat: add read-only preinstall simulation command (`pcg preinstall-report` / `pcg-doctor`) showing current state, planned changes, blockers, and warnings.
 - improve: show simulation report in bootstrap installer flow before final confirmation.
 - improve: include JSON output option for preinstall simulation report to support automation.
 
@@ -116,7 +116,7 @@
 ## 0.7.6
 
 - fix: prevent installer source-path corruption by isolating UI/spinner output from command-substitution output.
-- improve: add mandatory confirmation gate before mutation in both bootstrap installer and `proxmox-agent install`.
+- improve: add mandatory confirmation gate before mutation in both bootstrap installer and `pcg install`.
 - feat: add beginner-friendly install wizard for backup repo path, branch, remote URL, and log retention setup.
 - improve: add guided GitHub SSH retry loop during install to help users complete authentication without manual debugging.
 
@@ -128,30 +128,30 @@
 
 ## 0.7.4
 
-- improve: add configurable log retention for all `pa-*` custom logs with global and per-script overrides.
+- improve: add configurable log retention for all `pcg-*` custom logs with global and per-script overrides.
 - improve: standardize runtime log cleanup through shared helper logic to keep retention behavior consistent.
 - improve: document version-sync rules so `VERSION`, changelog release headers, and runtime version generation stay aligned.
 - feat: add guided bootstrap installer (`install.sh`) for curl-pipe installation flow with preflight and source fetch prompts.
-- improve: expand `proxmox-agent install` to provide clearer preflight output, prior-install detection, and missing remote guidance.
+- improve: expand `pcg install` to provide clearer preflight output, prior-install detection, and missing remote guidance.
 
 ## 0.7.3
 
-- improve: normalize managed artifact naming to canonical `pa-*` for scripts, units, env, and runtime version files.
-- feat: add automatic legacy-node migration during `proxmox-agent install` and `proxmox-agent upgrade`.
+- improve: normalize managed artifact naming to canonical `pcg-*` for scripts, units, env, and runtime version files.
+- feat: add automatic legacy-node migration during `pcg install` and `pcg upgrade`.
 - fix: prevent duplicate old/new unit scheduling by stopping and disabling legacy units during migration.
-- feat: add rollback-safe migration snapshots for install and upgrade under `/root/proxmox-agent-backups/`.
+- feat: add rollback-safe migration snapshots for install and upgrade under `/root/pcg-agent-backups/`.
 - improve: add doctor migration visibility with explicit legacy artifact status reporting.
-- improve: standardize runtime log naming to `pa-*` paths for easier operations monitoring.
+- improve: standardize runtime log naming to `pcg-*` paths for easier operations monitoring.
 
 ## 0.7.2
 
-- feat: add lifecycle CLI: `proxmox-agent install|doctor|backup|notify|upgrade`.
-- feat: add unified runtime version file: `/usr/local/bin/pa-agent-version`.
-- feat: add shared library: `pa-agent-lib.sh` for env/version/webhook helpers.
-- feat: add generic webhook sender with Bearer auth and retry: `pa-send-webhook.sh`.
+- feat: add lifecycle CLI: `pcg install|doctor|backup|notify|upgrade`.
+- feat: add unified runtime version file: `/usr/local/bin/pcg-agent-version`.
+- feat: add shared library: `pcg-agent-lib.sh` for env/version/webhook helpers.
+- feat: add generic webhook sender with Bearer auth and retry: `pcg-send-webhook.sh`.
 - feat: add `doctor --json` machine-readable health checks.
 - feat: add upgrade flow with `stable` (tag) and `edge` (raw URL) channels.
-- improve: add safe upgrade rollback using backups under `/root/proxmox-agent-backups/<timestamp>/`.
+- improve: add safe upgrade rollback using backups under `/root/pcg-agent-backups/<timestamp>/`.
 - improve: update backup flow to explicit allowlist and default secret exclusion.
 - improve: update shutdown flow to run a pre-shutdown backup and send webhook events.
 - improve: update unit files to run scripts from `/usr/local/bin`.

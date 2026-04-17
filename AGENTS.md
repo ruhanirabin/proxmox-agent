@@ -1,10 +1,10 @@
-# AGENTS.md - Proxmox Agent Contributor & Automation Guide
+# AGENTS.md - PCG (Proxmox Config Git) Contributor & Automation Guide
 
 This file defines operating rules for humans and automation (agents/bots) working on this repository.
 
 ## Project Snapshot
 
-- Product: Proxmox Agent (shell + systemd lifecycle automation)
+- Product: PCG — Proxmox (PVE) Config Git (shell + systemd lifecycle automation)
 - Goal: safe config backup lifecycle with install/doctor/upgrade operations
 - Runtime target: Proxmox host (Linux, systemd, root-managed scripts)
 
@@ -17,7 +17,7 @@ This file defines operating rules for humans and automation (agents/bots) workin
 
 ## Canonical Interfaces
 
-- CLI entrypoint: `proxmox-agent`
+- CLI entrypoint: `pcg`
 - Guided bootstrap installer entrypoint: `install.sh`
 - Supported commands:
   - `install`
@@ -31,7 +31,7 @@ This file defines operating rules for humans and automation (agents/bots) workin
 
 - Single source of truth version file in repo root: `VERSION`.
 - Runtime version file generated at install/upgrade:
-  - `/usr/local/bin/pa-agent-version`
+  - `/usr/local/bin/pcg-agent-version`
   - exports `AGENT_VERSION`.
 - Scripts must read `AGENT_VERSION`; do not maintain separate per-script semantic versions.
 - Version format is fixed: `MAJOR.MINOR.PATCH`.
@@ -49,15 +49,15 @@ This file defines operating rules for humans and automation (agents/bots) workin
 - Version sync policy for meaningful releases (feature/fix/improve/removed):
   - Update `VERSION` first.
   - Add a matching top entry in `docs/CHANGELOG.md` (newest-first).
-  - Ensure runtime writer in `bin/proxmox-agent` (`write_runtime_version`) is unchanged and still emits the new version into `/usr/local/bin/pa-agent-version`.
-  - Script headers should remain agnostic (`runtime sourced from pa-agent-version`) and must not hardcode static version numbers.
+  - Ensure runtime writer in `bin/pcg` (`write_runtime_version`) is unchanged and still emits the new version into `/usr/local/bin/pcg-agent-version`.
+  - Script headers should remain agnostic (`runtime sourced from pcg-agent-version`) and must not hardcode static version numbers.
 
 ## Naming Standard
 
-- Canonical managed artifacts must use `pa-*` naming.
-- Scripts in `/usr/local/bin`: `pa-*.sh` plus `proxmox-agent`.
-- Systemd units in `/etc/systemd/system`: `pa-*.service|timer`.
-- Runtime env: `/root/.pa-agent.env`.
+- Canonical managed artifacts must use `pcg-*` naming.
+- Scripts in `/usr/local/bin`: `pcg-*.sh` plus `pcg`.
+- Systemd units in `/etc/systemd/system`: `pcg-*.service|timer`.
+- Runtime env: `/root/.pcg-agent.env`.
 - Legacy names are migration-only and must not be used for new implementation.
 
 ## Repo Layout
@@ -118,7 +118,7 @@ Companion rules file: `docs/rules/commit_git_message_rule.md`
 - Never print secrets/tokens/private keys to logs.
 - Use predictable log locations under `/var/log/`.
 - Log retention must be operator-configurable through env:
-  - global: `PA_LOG_RETENTION_DAYS`
+  - global: `PCG_LOG_RETENTION_DAYS`
   - per script override: `*_LOG_RETENTION_DAYS`
 - Keep unit files minimal and consistent with script paths in `/usr/local/bin`.
 - `doctor` must remain non-destructive and report actionable failures.
@@ -127,7 +127,7 @@ Companion rules file: `docs/rules/commit_git_message_rule.md`
 ## Security & Secrets
 
 - Never commit real credentials.
-- Keep `/root/.pa-agent.env` private (`chmod 600`).
+- Keep `/root/.pcg-agent.env` private (`chmod 600`).
 - Exclude SSH private keys and token files from backup by default.
 - Webhook auth uses Bearer token when enabled.
 
@@ -137,13 +137,13 @@ Companion rules file: `docs/rules/commit_git_message_rule.md`
 - `edge` channel is opt-in and may track latest raw artifact.
 - Install/upgrade must auto-migrate legacy artifact names on existing nodes.
 - Operator migration note for existing nodes:
-  - Run `proxmox-agent install` once per legacy node to establish canonical `pa-*` baseline.
-  - After baseline migration, use normal `proxmox-agent upgrade` flow.
+  - Run `pcg install` once per legacy node to establish canonical `pcg-*` baseline.
+  - After baseline migration, use normal `pcg upgrade` flow.
 - Every release should include:
   - updated `VERSION`
   - updated `docs/CHANGELOG.md` entry at top
   - reviewed `install.sh` bootstrap flow for first-time users
-  - verification that `proxmox-agent doctor` passes on target host
+  - verification that `pcg doctor` passes on target host
 
 ## Definition of Done (Per Release)
 

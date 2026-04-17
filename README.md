@@ -1,8 +1,8 @@
-# Proxmox Agent
+# Proxmox (PVE) Config Git
 
 > **Quick Links:** [Changelog](docs/CHANGELOG.md) • [License](LICENSE)
 
-Proxmox Agent is a lightweight Bash + systemd toolkit that **backs up your Proxmox host configuration files to GitHub** — giving you a complete history of every change made to your node setup.
+PCG (Proxmox Config Git) is a lightweight Bash + systemd toolkit that **backs up your Proxmox host configuration files to GitHub** — giving you a complete history of every change made to your node setup.
 
 ## ⚠️ Important: What This Tool Does (And Doesn't Do)
 
@@ -27,22 +27,22 @@ Proxmox Agent is a lightweight Bash + systemd toolkit that **backs up your Proxm
 - Automatically commits and pushes only when changes exist.
 - Runs on both periodic timer and shutdown trigger.
 - Sends notifications to Telegram and/or webhook endpoints.
-- Migrates older legacy naming (`backup-config*`, `shutdown-proxmox*`, etc.) to canonical `pa-*` names.
+- Migrates older legacy naming (`backup-config*`, `shutdown-proxmox*`, etc.) to canonical `pcg-*` names.
 - Provides `doctor` and preinstall simulation reporting for safer operations.
 
 ## Key features
 
-- Canonical `pa-*` runtime naming for scripts, units, env, and logs.
-- Single runtime version source: `/usr/local/bin/pa-agent-version` generated from repo `VERSION`.
+- Canonical `pcg-*` runtime naming for scripts, units, env, and logs.
+- Single runtime version source: `/usr/local/bin/pcg-agent-version` generated from repo `VERSION`.
 - Guided installer flow (`install.sh`) with preflight checks and confirmation gate.
 - Lifecycle CLI:
-  - `proxmox-agent install [--resume|--clear-draft]`
-  - `proxmox-agent doctor [--json]`
-  - `proxmox-agent preinstall-report [--json]` (alias: `pa-doctor`)
-  - `proxmox-agent backup`
-  - `proxmox-agent notify [message]`
-  - `proxmox-agent uninstall`
-  - `proxmox-agent upgrade [--channel stable|edge] [--target <tag>]`
+  - `pcg install [--resume|--clear-draft]`
+  - `pcg doctor [--json]`
+  - `pcg preinstall-report [--json]` (alias: `pcg-doctor`)
+  - `pcg backup`
+  - `pcg notify [message]`
+  - `pcg uninstall`
+  - `pcg upgrade [--channel stable|edge] [--target <tag>]`
 - Automatic backup/rollback safety during install and upgrade.
 
 ## Requirements (Read This Before Installing)
@@ -125,7 +125,7 @@ If you have your own notification system (Discord, Slack, n8n, etc.), prepare:
 
 - Proxmox VE host with root shell access
 - `bash`, `curl`, `git`, `ssh`, `ssh-keygen`, `tar` (usually pre-installed)
-- `systemctl` (required for live install; skipped only in `PA_TEST_MODE=true`)
+- `systemctl` (required for live install; skipped only in `PCG_TEST_MODE=true`)
 - Internet access from your Proxmox node to reach GitHub
 
 ---
@@ -136,8 +136,10 @@ If you have your own notification system (Discord, Slack, n8n, etc.), prepare:
 
 **Remember:** Run this in the Proxmox VE shell, not inside a VM.
 
+**Note:** The one-liner bootstrap URL references the new repo name `ruhanirabin/pve-config-git`. This will not work until you rename the GitHub repository. For now, use the local repo install method.
+
 ```bash
-bash -c "$(curl -fsSL https://raw.githubusercontent.com/ruhanirabin/proxmox-agent/main/install.sh)"
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/ruhanirabin/pve-config-git/main/install.sh)"
 ```
 
 The guided bootstrap will:
@@ -146,26 +148,26 @@ The guided bootstrap will:
 2. Detect existing/legacy install.
 3. Run a read-only simulation report.
 4. Ask for explicit confirmation before mutating the host.
-5. Launch guided `proxmox-agent install`.
+5. Launch guided `pcg install`.
 
 ### Local repo install
 
 ```bash
-git clone https://github.com/ruhanirabin/proxmox-agent.git
-cd proxmox-agent
-sudo ./bin/proxmox-agent install
+git clone https://github.com/ruhanirabin/pve-config-git.git
+cd pve-config-git
+sudo ./bin/pcg install
 ```
 
 ## Guided install behavior
 
-`proxmox-agent install` is interactive and will prompt for:
+`pcg install` is interactive and will prompt for:
 
 - Backup repo path (`REPO_DIR`)
 - Branch (`REPO_BRANCH`)
 - Git remote URL (`GIT_REMOTE_URL`)
 - Git commit author full name (`GIT_COMMIT_NAME`)
 - Git commit author email (`GIT_COMMIT_EMAIL`)
-- Log retention days (`PA_LOG_RETENTION_DAYS`)
+- Log retention days (`PCG_LOG_RETENTION_DAYS`)
 - Notification mode (`telegram`, `webhook`, `both`) - at least one is required
 - Telegram values (`BOT_TOKEN`, `CHAT_ID`) if selected
 - Webhook URL/token if selected
@@ -176,7 +178,7 @@ At final confirmation, you can choose:
 - `save` (save draft and continue later)
 - `exit` (abort without applying)
 
-Draft settings are saved at `/root/.pa-agent-install-draft.env`.
+Draft settings are saved at `/root/.pcg-agent-install-draft.env`.
 
 If an existing install is detected, installer shows an early action menu:
 
@@ -187,9 +189,9 @@ If an existing install is detected, installer shows an early action menu:
 Use explicit draft controls:
 
 ```bash
-proxmox-agent install --resume
-proxmox-agent install --clear-draft
-proxmox-agent uninstall
+pcg install --resume
+pcg install --clear-draft
+pcg uninstall
 ```
 
 It also validates GitHub SSH auth and helps users retry after adding public keys.
@@ -205,17 +207,17 @@ Installer and CLI status messages use a shared color/icon system with automatic 
 Controls:
 
 - `NO_COLOR=1` disables ANSI colors
-- `PA_UI_ASCII=1` forces ASCII icons
+- `PCG_UI_ASCII=1` forces ASCII icons
 
-## Preflight simulation (`pa-doctor`)
+## Preflight simulation (`pcg-doctor`)
 
 Use this before installing/upgrading to see what will change.
 
 ```bash
-proxmox-agent preinstall-report
-proxmox-agent preinstall-report --json
+pcg preinstall-report
+pcg preinstall-report --json
 # alias
-pa-doctor
+pcg-doctor
 ```
 
 Report includes:
@@ -229,8 +231,8 @@ Report includes:
 ## Doctor health checks
 
 ```bash
-proxmox-agent doctor
-proxmox-agent doctor --json
+pcg doctor
+pcg doctor --json
 ```
 
 Checks include:
@@ -249,18 +251,18 @@ Non-zero exit means hard failure.
 
 Installed runtime paths:
 
-- Scripts: `/usr/local/bin/pa-*.sh`
-- CLI: `/usr/local/bin/proxmox-agent`
-- Version: `/usr/local/bin/pa-agent-version`
-- Env: `/root/.pa-agent.env`
-- Units: `/etc/systemd/system/pa-*.service|timer`
-- Backups (rollback snapshots): `/root/proxmox-agent-backups/<timestamp>/`
+- Scripts: `/usr/local/bin/pcg-*.sh`
+- CLI: `/usr/local/bin/pcg`
+- Version: `/usr/local/bin/pcg-agent-version`
+- Env: `/root/.pcg-agent.env`
+- Units: `/etc/systemd/system/pcg-*.service|timer`
+- Backups (rollback snapshots): `/root/pcg-agent-backups/<timestamp>/`
 
 ## Configuration
 
-Primary config file: `/root/.pa-agent.env`
+Primary config file: `/root/.pcg-agent.env`
 
-Template source: `env/pa-agent.env.example`
+Template source: `env/pcg-agent.env.example`
 
 Important variables:
 
@@ -271,7 +273,7 @@ Important variables:
 - `WEBHOOK_ENABLED`, `WEBHOOK_URL`, `WEBHOOK_BEARER_TOKEN`
 - `WEBHOOK_EVENTS` (`install,doctor,backup,shutdown` by default)
 - `WEBHOOK_TIMEOUT_SECONDS`, `WEBHOOK_MAX_RETRIES`
-- `PA_LOG_RETENTION_DAYS`
+- `PCG_LOG_RETENTION_DAYS`
 - Optional per-log overrides:
   - `BACKUP_LOG_RETENTION_DAYS`
   - `TELEGRAM_LOG_RETENTION_DAYS`
@@ -283,20 +285,20 @@ Important variables:
 
 ## Scheduled + shutdown behavior
 
-- `pa-backup-config.timer` triggers periodic backups via `pa-backup-config.service`.
-- `pa-shutdown-proxmox.service` runs graceful VM/LXC/host shutdown with pre-shutdown backup.
+- `pcg-backup-config.timer` triggers periodic backups via `pcg-backup-config.service`.
+- `pcg-shutdown-proxmox.service` runs graceful VM/LXC/host shutdown with pre-shutdown backup.
 - Shutdown script invocation supports:
   - systemd service execution
   - explicit SSH/manual trigger with `--execute`
 - Duplicate shutdown runs are blocked with a lock file guard.
 - Shutdown aborts safely when host uptime is under 5 minutes (boot protection).
-- `pa-boot-notify.service` can send boot notifications.
+- `pcg-boot-notify.service` can send boot notifications.
 
 ## Upgrades
 
 ```bash
-proxmox-agent upgrade --channel stable --target v0.7.8
-proxmox-agent upgrade --channel edge
+pcg upgrade --channel stable --target v0.7.8
+pcg upgrade --channel edge
 ```
 
 Upgrade flow:
@@ -317,16 +319,16 @@ After successful migration, legacy artifacts are removed to prevent duplicate ti
 For already-deployed older nodes, run once per node:
 
 ```bash
-proxmox-agent install
+pcg install
 ```
 
 ## Test mode (safe lab runs)
 
-Use `PA_TEST_MODE=true` to relax `systemctl` and GitHub SSH enforcement for local/container testing.
+Use `PCG_TEST_MODE=true` to relax `systemctl` and GitHub SSH enforcement for local/container testing.
 
 ```bash
-PA_TEST_MODE=true ./bin/proxmox-agent preinstall-report
-PA_TEST_MODE=true ./bin/proxmox-agent doctor
+PCG_TEST_MODE=true ./bin/pcg preinstall-report
+PCG_TEST_MODE=true ./bin/pcg doctor
 ```
 
 ### Automated Test Suite
@@ -366,13 +368,13 @@ tests/docker-guided-smoke.sh
 - `git_remote unreachable`
   - Verify `GIT_REMOTE_URL` and SSH access: `ssh -T git@github.com` and `git -C "$REPO_DIR" ls-remote origin`.
 - Duplicate legacy/canonical units
-  - Re-run `proxmox-agent install` and then `proxmox-agent doctor` to complete migration cleanup.
+  - Re-run `pcg install` and then `pcg doctor` to complete migration cleanup.
 
 ## Security notes
 
 - Secret files are excluded by default from backup collection.
 - Webhook bearer tokens are supported for outbound webhook auth.
-- Keep `/root/.pa-agent.env` at mode `600`.
+- Keep `/root/.pcg-agent.env` at mode `600`.
 
 ## Development notes
 
